@@ -3,10 +3,11 @@
 import hashlib
 import os
 import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 from typing import Optional
-from collections import deque
 
 from rich.console import Console
 from rich.progress import (
