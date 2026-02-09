@@ -131,12 +131,13 @@ class ParallelExporter:
                     effective_timeout = max(timeout_seconds, icloud_timeout_seconds)
                 else:
                     effective_timeout = max(timeout_seconds, 3600)
-            # Use original_filename (what Photos.app knows it as)
+            # Use UUID for precise lookup (avoids duplicate filename issues)
             success, exported_path, error_msg = export_via_applescript(
+                uuid=video.uuid,
                 filename=video.original_filename,
                 output_dir=export_dir,
                 timeout=effective_timeout,
-                max_retries=3,  # Retry 3 times for flaky AppleScript API
+                max_retries=3,
                 delay_between_retries=1.0,
                 post_export_wait_seconds=90 if not video.is_local else 30,
                 post_export_poll_seconds=2.0 if not video.is_local else 1.0,
