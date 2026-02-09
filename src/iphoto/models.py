@@ -57,11 +57,52 @@ class VideoInfo:
         return f"{self.size_mb:.1f} MB"
 
 
+def video_to_dict(video: VideoInfo) -> dict:
+    """Serialize VideoInfo to a JSON-friendly dict."""
+    return {
+        "uuid": video.uuid,
+        "filename": video.filename,
+        "original_filename": video.original_filename,
+        "date_created": video.date_created.isoformat(),
+        "date_modified": video.date_modified.isoformat(),
+        "size_bytes": video.size_bytes,
+        "duration_seconds": video.duration_seconds,
+        "width": video.width,
+        "height": video.height,
+        "location": video.location,
+        "place_name": video.place_name,
+        "moment_name": video.moment_name,
+        "moment_pk": video.moment_pk,
+        "is_local": video.is_local,
+    }
+
+
+def video_from_dict(data: dict) -> VideoInfo:
+    """Deserialize VideoInfo from a dict."""
+    return VideoInfo(
+        uuid=data["uuid"],
+        filename=data.get("filename") or "unknown",
+        original_filename=data.get("original_filename") or data.get("filename") or "unknown",
+        date_created=datetime.fromisoformat(data["date_created"]),
+        date_modified=datetime.fromisoformat(data["date_modified"]),
+        size_bytes=data["size_bytes"],
+        duration_seconds=data.get("duration_seconds", 0.0),
+        width=data.get("width", 0),
+        height=data.get("height", 0),
+        location=tuple(data["location"]) if data.get("location") else None,
+        place_name=data.get("place_name"),
+        moment_name=data.get("moment_name", ""),
+        moment_pk=data.get("moment_pk"),
+        is_local=data.get("is_local", True),
+    )
+
+
 @dataclass
 class MomentGroup:
     """Represents a moment with aggregate statistics."""
 
     name: str  # Display name: "Location • Date" format
+    key: str = ""  # Stable selection key (pk-based when available)
     pk: Optional[int] = None  # Unique moment identifier in Photos database
     location_title: str = ""  # Just the location name (e.g., "London")
     videos: list[VideoInfo] = field(default_factory=list)
@@ -230,10 +271,23 @@ class SessionState:
     # Configuration
     max_workers: int = 4
     threshold_mb: Optional[float] = None
+    min_age_days: Optional[int] = None
+    min_size_mb: Optional[float] = None
+    use_moments: bool = True
+    batch_size: Optional[int] = None
+    export_timeout: int = 1800
+    delete_timeout: int = 120
+    delete_enabled: bool = True
+    allow_ambiguous: bool = False
+    library_path: Optional[str] = None
+    manifest_path: Optional[str] = None
 
     # All selected videos for session
     all_selected_uuids: list[str] = field(default_factory=list)
     remaining_uuids: list[str] = field(default_factory=list)
+    videos: list[VideoInfo] = field(default_factory=list)
+    failed_export_uuids: list[str] = field(default_factory=list)
+    failed_delete_uuids: list[str] = field(default_factory=list)
 
     # Batch tracking
     batches: list[BatchProgress] = field(default_factory=list)
@@ -263,7 +317,12 @@ class SessionState:
         """Overall progress as percentage."""
         if not self.all_selected_uuids:
             return 0
-        return int(100 * self.total_deleted / len(self.all_selected_uuids))
+        return int(100 * self.completed_count / len(self.all_selected_uuids))
+
+    @property
+    def completed_count(self) -> int:
+        """Number of videos completed based on delete mode."""
+        return self.total_deleted if self.delete_enabled else self.total_archived
 
     @property
     def batches_completed(self) -> int:

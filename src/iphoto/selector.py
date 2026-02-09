@@ -37,9 +37,9 @@ def get_free_disk_space(path: Path) -> Optional[float]:
 
 
 
-def calculate_selection_stats(moments: list[MomentGroup], selected_moment_names: set[str]) -> dict:
+def calculate_selection_stats(moments: list[MomentGroup], selected_moment_keys: set[str]) -> dict:
     """Calculate statistics for current selection."""
-    selected_moment_objs = [m for m in moments if m.name in selected_moment_names]
+    selected_moment_objs = [m for m in moments if m.key in selected_moment_keys]
 
     archived_videos = []
     skipped_videos = []
@@ -127,7 +127,7 @@ def display_moments(
 
     for i, moment in enumerate(page_moments):
         idx = str(start + i + 1)
-        selected_mark = "✓" if moment.name in selected_moments else ""
+        selected_mark = "✓" if moment.key in selected_moments else ""
 
         # Safe formatting for threshold
         if moment.smart_threshold_mb is not None:
@@ -412,7 +412,7 @@ def interactive_select_moments(
             selected_moments.clear()
         elif choice == "preview":
             console.clear()
-            selected_moment_objs = [m for m in moments if m.name in selected_moments]
+            selected_moment_objs = [m for m in moments if m.key in selected_moments]
             filtered_videos = []
             for moment in selected_moment_objs:
                 filtered_videos.extend(moment.videos_above_threshold())
@@ -476,7 +476,7 @@ def interactive_select_moments(
                 start_idx = int(parts[0]) - 1
                 end_idx = int(parts[1])
                 for moment in moments[start_idx:end_idx]:
-                    selected_moments.add(moment.name)
+                    selected_moments.add(moment.key)
             except (ValueError, IndexError):
                 console.print("[red]Invalid range[/red]")
                 Prompt.ask("Press Enter to continue")
@@ -486,14 +486,14 @@ def interactive_select_moments(
                 indices = [int(x.strip()) - 1 for x in choice.split(",")]
                 for idx in indices:
                     if 0 <= idx < len(moments):
-                        selected_moments.add(moments[idx].name)
+                        selected_moments.add(moments[idx].key)
             except ValueError:
                 console.print("[red]Invalid selection[/red]")
                 Prompt.ask("Press Enter to continue")
 
 
     # Final confirmation - collect all videos above threshold from selected moments
-    selected_moment_objs = [m for m in moments if m.name in selected_moments]
+    selected_moment_objs = [m for m in moments if m.key in selected_moments]
     final_videos = []
     for moment in selected_moment_objs:
         final_videos.extend(moment.videos_above_threshold())

@@ -239,8 +239,12 @@ def group_by_moment(videos: list[VideoInfo], threshold_mb: Optional[float] = Non
         moment_name = vids[0].moment_name or "Unknown"
         moment_pk = vids[0].moment_pk
 
+        # Build a stable key for selection: use pk if available, else the dict key
+        stable_key = str(moment_pk) if moment_pk else str(moment_key)
+
         group = MomentGroup(
             name=moment_name,
+            key=stable_key,
             pk=moment_pk,
             location_title=moment_name.split(" • ")[0] if " • " in moment_name else moment_name,
             videos=vids,
