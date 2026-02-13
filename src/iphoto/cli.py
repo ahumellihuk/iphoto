@@ -202,6 +202,190 @@ def scan(
     console.print(f"\n[dim]Use 'iphoto archive' to start archiving.[/dim]")
 
 
+def _resume_or_create_session(
+    staging: Path,
+    external: Path,
+    min_age_days: Optional[int],
+    min_size_mb: Optional[float],
+    threshold_mb: Optional[float],
+    use_moments: bool,
+    batch_size: Optional[int],
+    export_timeout: int,
+    delete_timeout: int,
+    no_delete: bool,
+    allow_ambiguous: bool,
+    library: Optional[str],
+) -> Optional[tuple[SessionState, list[VideoInfo]]]:
+    """Resume existing session or create new one via scan+select."""
+    existing_session = load_session()
+    if existing_session and not existing_session.is_complete:
+        console.print(f"[bold cyan]Found interrupted session {existing_session.session_id}[/bold cyan]")
+        completion_label = "Deleted" if existing_session.delete_enabled else "Archived"
+        console.print(
+            f"  Progress: {existing_session.completed_count}/{len(existing_session.all_selected_uuids)} "
+            f"videos {completion_label.lower()}"
+        )
+        console.print(f"  Batches completed: {existing_session.batches_completed}")
+        if Confirm.ask("Resume this session?"):
+            session = existing_session
+            if not session.manifest_path:
+                session.manifest_path = str(external / f"iphoto_manifest_{session.session_id}.json")
+                save_session(session)
+            if session.videos:
+                return session, session.videos
+            all_videos = scan_videos(
+                min_age_days=session.min_age_days,
+                min_size_mb=session.min_size_mb,
+                library_path=session.library_path,
+            )
+            return session, all_videos
+        else:
+            if Confirm.ask("Clear this session and start fresh?"):
+                clear_session()
+            return None
+
+    # New session
+    console.print("[bold]Step 1:[/bold] Scanning Photos library...\n")
+    all_videos = scan_videos(min_age_days=min_age_days, min_size_mb=min_size_mb, library_path=library)
+    if not all_videos:
+        console.print("[yellow]No videos found matching criteria.[/yellow]")
+        return None
+
+    icloud_count = len([v for v in all_videos if not v.is_local])
+    if icloud_count:
+        console.print(f"[cyan]{icloud_count} videos in iCloud (will use local cache for export)[/cyan]\n")
+
+    all_videos = rank_videos(all_videos, sort_by="size")
+    display_summary(all_videos)
+
+    console.print("\n[bold]Step 2:[/bold] Select videos to archive...\n")
+    if use_moments and all_videos:
+        moments = group_by_moment(all_videos)
+        console.print(f"[cyan]Grouped into {len(moments)} moments[/cyan]\n")
+        selected = interactive_select_moments(moments, external_path=external, threshold_mb=threshold_mb)
+    else:
+        selected = interactive_select(all_videos, max_size_gb=None)
+
+    if not selected:
+        console.print("[yellow]No videos selected. Exiting.[/yellow]")
+        return None
+
+    session = SessionState(
+        staging_path=staging, external_path=external,
+        all_selected_uuids=[v.uuid for v in selected],
+        remaining_uuids=[v.uuid for v in selected],
+        threshold_mb=threshold_mb, min_age_days=min_age_days, min_size_mb=min_size_mb,
+        use_moments=use_moments, batch_size=batch_size,
+        export_timeout=export_timeout, delete_timeout=delete_timeout,
+        delete_enabled=not no_delete, allow_ambiguous=allow_ambiguous,
+        library_path=library, videos=selected,
+    )
+    session.manifest_path = str(external / f"iphoto_manifest_{session.session_id}.json")
+    save_session(session)
+    console.print(f"\n[cyan]Created session {session.session_id} with {len(selected)} videos[/cyan]\n")
+    return session, all_videos
+
+
+def _export_batch_phase(
+    batch_videos: list[VideoInfo],
+    staging: Path,
+    session: SessionState,
+    batch: BatchProgress,
+    dry_run: bool,
+) -> tuple[dict[str, tuple[Path, str]], dict[str, str]]:
+    """Phase 1: Export videos from Photos to staging."""
+    console.print(f"[bold]Phase 1:[/bold] Exporting {len(batch_videos)} videos...")
+    if dry_run:
+        from .selector import format_total_size
+        console.print("[cyan][DRY RUN] Would export the following videos:[/cyan]")
+        for v in batch_videos:
+            console.print(f"  [dim]- {v.original_filename} ({v.size_formatted})[/dim]")
+        console.print(f"  [cyan]Total: {format_total_size(batch_videos)}[/cyan]")
+        return {v.uuid: (staging / v.original_filename, "dry") for v in batch_videos}, {}
+
+    exported, export_failures = export_videos(
+        batch_videos, staging,
+        library_path=session.library_path,
+        timeout_seconds=session.export_timeout,
+        allow_ambiguous=session.allow_ambiguous,
+    )
+    batch.exported_uuids = list(exported.keys())
+    batch.failed_exports = export_failures
+    batch.checksums = {uuid: cs for uuid, (_, cs) in exported.items()}
+    session.total_exported += len(exported)
+    session.total_failed_exports += len(export_failures)
+    if export_failures:
+        session.failed_export_uuids = sorted(
+            set(session.failed_export_uuids).union(export_failures.keys())
+        )
+    save_session(session)
+    return exported, export_failures
+
+
+def _archive_batch_phase(
+    exported: dict[str, tuple[Path, str]],
+    batch_videos: list[VideoInfo],
+    all_videos_map: dict[str, VideoInfo],
+    session: SessionState,
+    batch: BatchProgress,
+    dry_run: bool,
+) -> dict[str, Path]:
+    """Phase 2+3: Archive to external and optionally delete from Photos."""
+    console.print(f"\n[bold]Phase 2:[/bold] Archiving to external drive...")
+    if dry_run:
+        console.print(f"[cyan][DRY RUN] Would archive {len(exported)} videos[/cyan]")
+        archived = dict(exported)
+    else:
+        archived = move_to_archive(exported, session.external_path)
+        batch.archived_uuids = list(archived.keys())
+        session.total_archived += len(archived)
+        save_session(session)
+        cleanup_staging(session.staging_path)
+
+        # Update manifest
+        if session.manifest_path and archived:
+            manifest_entries = []
+            for uuid, dest_path in archived.items():
+                video = all_videos_map.get(uuid)
+                if not video:
+                    continue
+                checksum = batch.checksums.get(uuid)
+                if not checksum and dest_path.exists():
+                    checksum = compute_sha256(dest_path)
+                manifest_entries.append(
+                    build_manifest_entry(video=video, archived_path=dest_path, checksum=checksum or "", session_id=session.session_id)
+                )
+            if manifest_entries:
+                append_manifest_entries(Path(session.manifest_path), manifest_entries)
+
+    if not archived:
+        return {}
+
+    # Phase 3: Delete
+    if session.delete_enabled:
+        console.print(f"\n[bold]Phase 3:[/bold] Deleting from Photos...")
+        archived_videos = [v for v in batch_videos if v.uuid in archived]
+        deleted, delete_failures = delete_from_photos(
+            archived_videos,
+            dry_run=dry_run,
+            timeout_seconds=session.delete_timeout,
+            allow_ambiguous=session.allow_ambiguous,
+        )
+        if not dry_run:
+            batch.deleted_uuids = deleted
+            batch.failed_deletes = delete_failures
+            session.total_deleted += len(deleted)
+            session.total_failed_deletes += len(delete_failures)
+            if delete_failures:
+                session.failed_delete_uuids = sorted(
+                    set(session.failed_delete_uuids).union(delete_failures.keys())
+                )
+
+    batch.completed_at = datetime.now()
+    save_session(session)
+    return archived
+
+
 @app.command()
 def archive(
     staging: Path = typer.Option(
@@ -258,118 +442,16 @@ def archive(
         console.print("[bold cyan]DRY RUN MODE - No changes will be made[/bold cyan]")
         console.print("[bold cyan]=" * 50 + "\n")
 
-
-    # Check for existing session
-    existing_session = load_session()
-    if existing_session and not existing_session.is_complete:
-        console.print(f"[bold cyan]Found interrupted session {existing_session.session_id}[/bold cyan]")
-        completion_label = "Deleted" if existing_session.delete_enabled else "Archived"
-        console.print(
-            f"  Progress: {existing_session.completed_count}/{len(existing_session.all_selected_uuids)} "
-            f"videos {completion_label.lower()}"
-        )
-        console.print(f"  Batches completed: {existing_session.batches_completed}")
-        if Confirm.ask("Resume this session?"):
-            # Resume from session - session will be updated and saved
-            session = existing_session
-            # Use session configuration for consistency
-            staging = session.staging_path
-            external = session.external_path
-            min_age_days = session.min_age_days
-            min_size_mb = session.min_size_mb
-            threshold_mb = session.threshold_mb
-            use_moments = session.use_moments
-            batch_size = session.batch_size
-            export_timeout = session.export_timeout
-            delete_timeout = session.delete_timeout
-            no_delete = not session.delete_enabled
-            max_workers = session.max_workers
-            library = session.library_path
-            allow_ambiguous = session.allow_ambiguous or allow_ambiguous
-            if allow_ambiguous != session.allow_ambiguous:
-                session.allow_ambiguous = allow_ambiguous
-                save_session(session)
-
-            if not session.manifest_path:
-                session.manifest_path = str(external / f"iphoto_manifest_{session.session_id}.json")
-                save_session(session)
-
-            if session.videos:
-                all_videos = session.videos
-            else:
-                all_videos = scan_videos(
-                    min_age_days=min_age_days,
-                    min_size_mb=min_size_mb,
-                    library_path=library,
-                )
-        else:
-            if Confirm.ask("Clear this session and start fresh?"):
-                clear_session()
-            return
-    else:
-        # New session - scan and select
-        console.print("[bold]Step 1:[/bold] Scanning Photos library...\n")
-        all_videos = scan_videos(
-            min_age_days=min_age_days,
-            min_size_mb=min_size_mb,
-            library_path=library,
-        )
-
-        if not all_videos:
-            console.print("[yellow]No videos found matching criteria.[/yellow]")
-            return
-
-        # Show iCloud status
-        icloud_count = len([v for v in all_videos if not v.is_local])
-        if icloud_count:
-            console.print(f"[cyan]{icloud_count} videos in iCloud (will use local cache for export)[/cyan]\n")
-
-        all_videos = rank_videos(all_videos, sort_by="size")
-        display_summary(all_videos)
-
-        # Step 2: Interactive selection
-        console.print("\n[bold]Step 2:[/bold] Select videos to archive...\n")
-
-        if use_moments and len(all_videos) > 0:
-            # Moment-based workflow
-            moments = group_by_moment(all_videos)
-            console.print(f"[cyan]Grouped into {len(moments)} moments[/cyan]\n")
-            selected = interactive_select_moments(
-                moments,
-                external_path=external,
-                threshold_mb=threshold_mb
-            )
-        else:
-            # Traditional flat workflow
-            all_videos = rank_videos(all_videos, sort_by="size")
-            selected = interactive_select(all_videos, max_size_gb=None)
-
-        if not selected:
-            console.print("[yellow]No videos selected. Exiting.[/yellow]")
-            return
-
-        # Create new session
-        session = SessionState(
-            staging_path=staging,
-            external_path=external,
-            all_selected_uuids=[v.uuid for v in selected],
-            remaining_uuids=[v.uuid for v in selected],
-            max_workers=max_workers,
-            threshold_mb=threshold_mb,
-            min_age_days=min_age_days,
-            min_size_mb=min_size_mb,
-            use_moments=use_moments,
-            batch_size=batch_size,
-            export_timeout=export_timeout,
-            delete_timeout=delete_timeout,
-            delete_enabled=not no_delete,
-            allow_ambiguous=allow_ambiguous,
-            library_path=library,
-            videos=selected,
-        )
-        session.manifest_path = str(external / f"iphoto_manifest_{session.session_id}.json")
-        save_session(session)
-        console.print(f"\n[cyan]Created session {session.session_id} with {len(selected)} videos[/cyan]\n")
+    # Resume or create session
+    result = _resume_or_create_session(
+        staging=staging, external=external, min_age_days=min_age_days,
+        min_size_mb=min_size_mb, threshold_mb=threshold_mb, use_moments=use_moments,
+        batch_size=batch_size, export_timeout=export_timeout, delete_timeout=delete_timeout,
+        no_delete=no_delete, allow_ambiguous=allow_ambiguous, library=library,
+    )
+    if not result:
+        return
+    session, all_videos = result
 
     # Ensure staging directory exists before disk usage checks
     staging.mkdir(parents=True, exist_ok=True)
@@ -430,7 +512,6 @@ def archive(
 
         # If batch exceeds available space, reduce it
         if actual_batch_size_bytes > usable_bytes:
-            # Reduce batch size to fit available space
             batch_videos = []
             for uuid in session.remaining_uuids:
                 video = all_videos_map[uuid]
@@ -448,13 +529,13 @@ def archive(
                 return
 
             batch_uuids = [v.uuid for v in batch_videos]
-            console.print(f"[yellow]⚠ Batch size adjusted from {calculated_batch_size} to {len(batch_videos)} "
+            console.print(f"[yellow]Batch size adjusted from {calculated_batch_size} to {len(batch_videos)} "
                          f"to fit available staging space[/yellow]")
 
         batch = session.add_batch(batch_num, batch_uuids)
         total_size_gb = sum(v.size_bytes for v in batch_videos) / (1024 ** 3)
         estimated_batches = len(session.all_selected_uuids) // calculated_batch_size + 1
-        console.print(f"\n[bold cyan]═══ Batch {batch_num}/{estimated_batches} ═══[/bold cyan]")
+        console.print(f"\n[bold cyan]--- Batch {batch_num}/{estimated_batches} ---[/bold cyan]")
         console.print(f"Videos: {len(batch_videos)} | Size: {total_size_gb:.2f} GB")
         completion_label = "Deleted" if session.delete_enabled else "Archived"
         console.print(
@@ -462,36 +543,9 @@ def archive(
             f"videos {completion_label.lower()} ({session.progress_pct}%)\n"
         )
 
-        # === Phase 1: Parallel Export ===
+        # Phase 1: Export
         phase1_start = time.time()
-        console.print(f"[bold]Phase 1:[/bold] Exporting {len(batch_videos)} videos...")
-        if not dry_run:
-            exported, export_failures = export_videos(
-                batch_videos,
-                staging,
-                library_path=library,
-                timeout_seconds=export_timeout,
-                max_workers=max_workers,
-                allow_ambiguous=allow_ambiguous,
-            )
-            batch.exported_uuids = list(exported.keys())
-            batch.failed_exports = export_failures
-            batch.checksums = {uuid: cs for uuid, (_, cs) in exported.items()}
-            session.total_exported += len(exported)
-            session.total_failed_exports += len(export_failures)
-            if export_failures:
-                session.failed_export_uuids = sorted(
-                    set(session.failed_export_uuids).union(export_failures.keys())
-                )
-            save_session(session)
-        else:
-            console.print("[cyan][DRY RUN] Would export the following videos:[/cyan]")
-            from .selector import format_total_size
-            for v in batch_videos:
-                console.print(f"  [dim]- {v.original_filename} ({v.size_formatted})[/dim]")
-            console.print(f"  [cyan]Total: {format_total_size(batch_videos)}[/cyan]")
-            exported = {v.uuid: (staging / v.original_filename, "dry") for v in batch_videos}
-            export_failures = {}
+        exported, export_failures = _export_batch_phase(batch_videos, staging, session, batch, dry_run)
 
         if not exported:
             console.print("[red]Batch export failed. Stopping.[/red]")
@@ -499,86 +553,19 @@ def archive(
             return
 
         phase1_time = time.time() - phase1_start
-        console.print(f"[green]✓ Exported: {len(exported)} videos in {phase1_time:.1f}s[/green]")
+        console.print(f"[green]Exported: {len(exported)} videos in {phase1_time:.1f}s[/green]")
         if export_failures:
-            console.print(f"[yellow]⚠ Failed: {len(export_failures)} videos[/yellow]")
+            console.print(f"[yellow]Failed: {len(export_failures)} videos[/yellow]")
 
-        # === Phase 2: Archive to External ===
+        # Phase 2+3: Archive and delete
         phase2_start = time.time()
-        console.print(f"\n[bold]Phase 2:[/bold] Archiving to external drive...")
-
-        if not dry_run:
-            archived = move_to_archive(exported, external)
-            batch.archived_uuids = list(archived.keys())
-            session.total_archived += len(archived)
-            save_session(session)
-            cleanup_staging(staging)
-
-            # Update manifest with archived files
-            if session.manifest_path and archived:
-                manifest_entries = []
-                for uuid, dest_path in archived.items():
-                    video = all_videos_map.get(uuid)
-                    if not video:
-                        continue
-                    checksum = batch.checksums.get(uuid)
-                    if not checksum and dest_path.exists():
-                        checksum = compute_sha256(dest_path)
-                    manifest_entries.append(
-                        build_manifest_entry(
-                            video=video,
-                            archived_path=dest_path,
-                            checksum=checksum or "",
-                            session_id=session.session_id,
-                        )
-                    )
-                if manifest_entries:
-                    append_manifest_entries(Path(session.manifest_path), manifest_entries)
-        else:
-            console.print(f"[cyan][DRY RUN] Would archive {len(exported)} videos[/cyan]")
-            archived = exported
+        archived = _archive_batch_phase(exported, batch_videos, all_videos_map, session, batch, dry_run)
+        phase23_time = time.time() - phase2_start
 
         if not archived:
             console.print("[red]Archive failed. Stopping.[/red]")
             save_session(session)
             return
-
-        phase2_time = time.time() - phase2_start
-        console.print(f"[green]✓ Archived: {len(archived)} videos in {phase2_time:.1f}s[/green]")
-
-        # === Phase 3: Delete from Photos ===
-        phase3_time = 0
-        if not no_delete:
-            phase3_start = time.time()
-            console.print(f"\n[bold]Phase 3:[/bold] Deleting from Photos...")
-
-            archived_videos = [v for v in batch_videos if v.uuid in archived]
-            deleted, delete_failures = delete_from_photos(
-                archived_videos,
-                dry_run=dry_run,
-                timeout_seconds=delete_timeout,
-                allow_ambiguous=allow_ambiguous,
-            )
-
-            if not dry_run:
-                batch.deleted_uuids = deleted
-                batch.failed_deletes = delete_failures
-                session.total_deleted += len(deleted)
-                session.total_failed_deletes += len(delete_failures)
-                if delete_failures:
-                    session.failed_delete_uuids = sorted(
-                        set(session.failed_delete_uuids).union(delete_failures.keys())
-                    )
-                batch.completed_at = datetime.now()
-                save_session(session)
-
-            phase3_time = time.time() - phase3_start
-            console.print(f"[green]✓ Deleted: {len(deleted)} videos in {phase3_time:.1f}s[/green]")
-            if delete_failures:
-                console.print(f"[yellow]⚠ Failed: {len(delete_failures)} videos[/yellow]")
-        else:
-            batch.completed_at = datetime.now()
-            save_session(session)
 
         # Update session state
         session.remaining_uuids = [u for u in session.remaining_uuids if u not in batch_uuids]
@@ -590,9 +577,8 @@ def archive(
 
         # Calculate and show statistics
         console.print(f"\n[bold cyan]Batch {batch_num} Complete[/bold cyan]")
-        console.print(f"  Time: {batch_total_time:.1f}s (Export: {phase1_time:.1f}s, Archive: {phase2_time:.1f}s, Delete: {phase3_time:.1f}s)")
+        console.print(f"  Time: {batch_total_time:.1f}s (Export: {phase1_time:.1f}s, Archive+Delete: {phase23_time:.1f}s)")
 
-        # Session-level progress
         elapsed_total = time.time() - session_start_time
         avg_batch_time = sum(batch_times) / len(batch_times) if batch_times else 0
         remaining_batches = max(
@@ -610,11 +596,9 @@ def archive(
         # Continue or pause
         if session.remaining_uuids:
             if continuous:
-                # Continue to next batch automatically
                 batch_num += 1
                 continue
             else:
-                # Interactive mode - prompt between batches
                 remaining_count = len(session.remaining_uuids)
                 if not Confirm.ask(f"\n{remaining_count} videos remaining. Continue?"):
                     console.print("[yellow]Session paused. Run 'iphoto archive' to resume.[/yellow]")
@@ -623,8 +607,8 @@ def archive(
         else:
             break
 
-    # === Final Summary ===
-    console.print("\n[bold green]✓ Session Complete[/bold green]")
+    # Final Summary
+    console.print("\n[bold green]Session Complete[/bold green]")
     console.print(f"  Session: {session.session_id}")
     console.print(f"  Exported: {session.total_exported}/{len(session.all_selected_uuids)}")
     console.print(f"  Archived: {session.total_archived}/{session.total_exported}")
