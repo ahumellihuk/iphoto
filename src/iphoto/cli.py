@@ -16,7 +16,7 @@ from . import __version__
 from .deleter import delete_from_photos
 from .exporter import export_videos, calculate_batch_size, compute_sha256
 from .manifest import append_manifest_entries, build_manifest_entry, load_manifest
-from .models import BatchState, VideoInfo, MomentGroup, SessionState, BatchProgress, video_to_dict, video_from_dict
+from .models import VideoInfo, MomentGroup, SessionState, BatchProgress, video_to_dict, video_from_dict
 from .mover import DEFAULT_EXTERNAL_PATH, cleanup_staging, move_to_archive
 from .scanner import rank_videos, scan_videos, group_by_moment
 from .selector import display_summary, display_videos, interactive_select, interactive_select_moments, display_moments
@@ -29,56 +29,7 @@ app = typer.Typer(
 console = Console()
 
 DEFAULT_STAGING = Path.home() / "PhotosStaging"
-STATE_FILE = Path.home() / ".iphoto_state.json"
 SESSION_FILE = Path.home() / ".iphoto_session.json"
-
-
-def save_state(state: BatchState) -> None:
-    """Save batch state for resumption."""
-    data = {
-        "batch_id": state.batch_id,
-        "staging_path": str(state.staging_path),
-        "external_path": str(state.external_path),
-        "selected_uuids": state.selected_uuids,
-        "exported_uuids": state.exported_uuids,
-        "archived_uuids": state.archived_uuids,
-        "deleted_uuids": state.deleted_uuids,
-        "checksums": state.checksums,
-        "created_at": state.created_at.isoformat(),
-        "failed_exports": state.failed_exports,
-        "failed_deletes": state.failed_deletes,
-    }
-    STATE_FILE.write_text(json.dumps(data, indent=2))
-
-
-def load_state() -> Optional[BatchState]:
-    """Load batch state if exists."""
-    if not STATE_FILE.exists():
-        return None
-    try:
-        data = json.loads(STATE_FILE.read_text())
-        return BatchState(
-            batch_id=data["batch_id"],
-            staging_path=Path(data["staging_path"]),
-            external_path=Path(data["external_path"]),
-            selected_uuids=data["selected_uuids"],
-            exported_uuids=data["exported_uuids"],
-            archived_uuids=data["archived_uuids"],
-            deleted_uuids=data["deleted_uuids"],
-            checksums=data["checksums"],
-            created_at=datetime.fromisoformat(data["created_at"]),
-            failed_exports=data.get("failed_exports", {}),
-            failed_deletes=data.get("failed_deletes", {}),
-        )
-    except Exception as e:
-        console.print(f"[yellow]Warning: Could not load state: {e}[/yellow]")
-        return None
-
-
-def clear_state() -> None:
-    """Clear saved batch state."""
-    if STATE_FILE.exists():
-        STATE_FILE.unlink()
 
 
 def save_session(session: SessionState) -> None:
@@ -937,30 +888,8 @@ def status() -> None:
             console.print("[green]Session cleared.[/green]")
         return
 
-    state = load_state()
-    if not state:
-        console.print("[yellow]No session or batch state found.[/yellow]")
-        console.print("[dim]Use 'iphoto archive' to start a new session.[/dim]")
-        return
-
-    console.print(f"[bold]Batch {state.batch_id} Status[/bold]")
-    console.print(f"Created: {state.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n")
-
-    console.print("[bold]Progress:[/bold]")
-    console.print(f"  Selected:  {len(state.selected_uuids)} videos")
-    console.print(f"  Exported:  {len(state.exported_uuids)}/{len(state.selected_uuids)}")
-    console.print(f"  Archived:  {len(state.archived_uuids)}/{len(state.exported_uuids)}")
-    console.print(f"  Deleted:   {len(state.deleted_uuids)}/{len(state.archived_uuids)}")
-
-    total_failures = len(state.failed_exports) + len(state.failed_deletes)
-    if total_failures > 0:
-        console.print(f"\n[bold yellow]Failures: {total_failures} total[/bold yellow]")
-    else:
-        console.print("\n[green]No failures![/green]")
-
-    if Confirm.ask("\nClear batch state?"):
-        clear_state()
-        console.print("[green]Batch state cleared.[/green]")
+    console.print("[yellow]No session found.[/yellow]")
+    console.print("[dim]Use 'iphoto archive' to start a new session.[/dim]")
 
 
 @app.command()
