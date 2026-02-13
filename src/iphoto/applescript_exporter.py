@@ -7,7 +7,14 @@ videos share the same filename.
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import NamedTuple, Optional
+
+
+class ExportResult(NamedTuple):
+    """Result of an AppleScript export attempt."""
+    success: bool
+    path: Optional[Path]
+    error: Optional[str]
 
 
 def run_applescript(script: str, timeout: int) -> tuple[bool, str, str]:
@@ -94,6 +101,26 @@ def _find_exported_file(output_dir: Path, filename: str) -> Optional[Path]:
     return None
 
 
+def _poll_for_file(
+    output_dir: Path,
+    filename: str,
+    timeout_seconds: int,
+    poll_interval: float,
+) -> Optional[Path]:
+    """Poll for an exported file to appear with non-zero size."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        found = _find_exported_file(output_dir, filename)
+        if found and found.stat().st_size > 0:
+            return found
+        time.sleep(poll_interval)
+    # Final check
+    found = _find_exported_file(output_dir, filename)
+    if found and found.stat().st_size > 0:
+        return found
+    return None
+
+
 def export_via_applescript(
     uuid: str,
     filename: str,
@@ -103,7 +130,7 @@ def export_via_applescript(
     delay_between_retries: float = 1.0,
     post_export_wait_seconds: int = 30,
     post_export_poll_seconds: float = 1.0,
-) -> Tuple[bool, Optional[Path], Optional[str]]:
+) -> ExportResult:
     """Export a video from Photos.app using AppleScript with UUID lookup.
 
     Args:
@@ -163,24 +190,12 @@ end tell
 
             if success:
                 if output == "SUCCESS":
-                    # Poll for exported file (Photos uses the original filename)
-                    deadline = time.time() + post_export_wait_seconds
-                    while time.time() < deadline:
-                        found = _find_exported_file(output_dir, filename)
-                        if found and found.stat().st_size > 0:
-                            return True, found, None
-                        time.sleep(post_export_poll_seconds)
-
-                    # Final check
-                    found = _find_exported_file(output_dir, filename)
-                    if found and found.stat().st_size > 0:
-                        return True, found, None
-
-                    last_error = (
-                        f"Export reported success but file not created after {post_export_wait_seconds}s"
-                    )
+                    found = _poll_for_file(output_dir, filename, post_export_wait_seconds, post_export_poll_seconds)
+                    if found:
+                        return ExportResult(True, found, None)
+                    last_error = f"Export reported success but file not created after {post_export_wait_seconds}s"
                 elif output.startswith("ERROR:NOT_FOUND"):
-                    return False, None, f"Video uuid={uuid} not found in Photos library"
+                    return ExportResult(False, None, f"Video uuid={uuid} not found in Photos library")
                 elif output.startswith("ERROR:"):
                     parts = output.split(":", 2)
                     if len(parts) >= 3:
@@ -208,4 +223,4 @@ end tell
             delay = delay_between_retries * (2 ** attempt)
             time.sleep(delay)
 
-    return False, None, f"Export failed after {max_retries} attempts: {last_error}"
+    return ExportResult(False, None, f"Export failed after {max_retries} attempts: {last_error}")
