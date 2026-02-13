@@ -441,8 +441,8 @@ def archive(
                     break
 
             if not batch_videos:
-                # Even one video won't fit - critical space issue
-                console.print(f"[red]✗ CRITICAL: Largest remaining video ({video.size_bytes / (1024**3):.2f} GB) "
+                first_video = all_videos_map[session.remaining_uuids[0]]
+                console.print(f"[red]CRITICAL: Largest remaining video ({first_video.size_bytes / (1024**3):.2f} GB) "
                              f"exceeds available space ({usable_bytes / (1024**3):.2f} GB)[/red]")
                 console.print("[red]Cannot proceed. Free up staging space and retry.[/red]")
                 return
