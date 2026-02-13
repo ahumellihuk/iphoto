@@ -110,15 +110,17 @@ class MomentGroup:
             return min_date
         return f"{min_date} to {max_date}"
 
+    @property
+    def _threshold_bytes(self) -> float:
+        return self.threshold_mb * 1024 * 1024
+
     def videos_above_threshold(self) -> list[VideoInfo]:
         """Returns videos larger than the threshold."""
-        threshold_bytes = self.threshold_mb * 1024 * 1024
-        return [v for v in self.videos if v.size_bytes >= threshold_bytes]
+        return [v for v in self.videos if v.size_bytes >= self._threshold_bytes]
 
     def videos_below_threshold(self) -> list[VideoInfo]:
         """Returns videos smaller than the threshold."""
-        threshold_bytes = self.threshold_mb * 1024 * 1024
-        return [v for v in self.videos if v.size_bytes < threshold_bytes]
+        return [v for v in self.videos if v.size_bytes < self._threshold_bytes]
 
     @property
     def threshold_summary(self) -> str:

@@ -123,32 +123,23 @@ def scan_videos(
             # Get duration from our pre-fetched map
             duration = duration_map.get(photo.uuid, 0.0)
 
-            # Get moment info from osxphotos moment_info
+            # Get moment info from osxphotos
             moment_name = None
             moment_pk = None
             try:
-                if hasattr(photo, 'moment_info') and photo.moment_info:
-                    mi = photo.moment_info
-                    # Extract moment PK (unique identifier)
-                    if hasattr(mi, 'pk') and mi.pk:
-                        moment_pk = mi.pk
-
-                    # Create composite moment name: "Location • Date" format
-                    location_title = None
-                    if hasattr(mi, 'title') and mi.title:
-                        location_title = mi.title
-
-                    if location_title and hasattr(mi, 'start_date') and mi.start_date:
-                        # Format: "London • May 15, 2024"
-                        start_date = mi.start_date
+                mi = getattr(photo, 'moment_info', None)
+                if mi:
+                    moment_pk = getattr(mi, 'pk', None) or None
+                    title = getattr(mi, 'title', None)
+                    start_date = getattr(mi, 'start_date', None)
+                    if title and start_date:
                         if start_date.tzinfo:
                             start_date = start_date.astimezone().replace(tzinfo=None)
-                        date_str = start_date.strftime("%b %d, %Y")
-                        moment_name = f"{location_title} • {date_str}"
-                    elif location_title:
-                        moment_name = location_title
+                        moment_name = f"{title} • {start_date.strftime('%b %d, %Y')}"
+                    elif title:
+                        moment_name = title
             except Exception:
-                pass  # Fall back to date-based name if moment extraction fails
+                pass
 
             # Check if video is locally available (not just in iCloud)
             # A video is considered local if it has a valid path or is not marked as cloud-only

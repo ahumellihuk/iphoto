@@ -7,14 +7,7 @@ videos share the same filename.
 import subprocess
 import time
 from pathlib import Path
-from typing import NamedTuple, Optional
-
-
-class ExportResult(NamedTuple):
-    """Result of an AppleScript export attempt."""
-    success: bool
-    path: Optional[Path]
-    error: Optional[str]
+from typing import Optional
 
 
 def run_applescript(script: str, timeout: int) -> tuple[bool, str, str]:
@@ -130,7 +123,7 @@ def export_via_applescript(
     delay_between_retries: float = 1.0,
     post_export_wait_seconds: int = 30,
     post_export_poll_seconds: float = 1.0,
-) -> ExportResult:
+) -> tuple[bool, Optional[Path], Optional[str]]:
     """Export a video from Photos.app using AppleScript with UUID lookup.
 
     Args:
@@ -192,10 +185,10 @@ end tell
                 if output == "SUCCESS":
                     found = _poll_for_file(output_dir, filename, post_export_wait_seconds, post_export_poll_seconds)
                     if found:
-                        return ExportResult(True, found, None)
+                        return True, found, None
                     last_error = f"Export reported success but file not created after {post_export_wait_seconds}s"
                 elif output.startswith("ERROR:NOT_FOUND"):
-                    return ExportResult(False, None, f"Video uuid={uuid} not found in Photos library")
+                    return False, None, f"Video uuid={uuid} not found in Photos library"
                 elif output.startswith("ERROR:"):
                     parts = output.split(":", 2)
                     if len(parts) >= 3:
@@ -223,4 +216,4 @@ end tell
             delay = delay_between_retries * (2 ** attempt)
             time.sleep(delay)
 
-    return ExportResult(False, None, f"Export failed after {max_retries} attempts: {last_error}")
+    return False, None, f"Export failed after {max_retries} attempts: {last_error}"
