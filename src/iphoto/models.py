@@ -52,9 +52,7 @@ class VideoInfo:
 
     @property
     def size_formatted(self) -> str:
-        if self.size_gb >= 1:
-            return f"{self.size_gb:.2f} GB"
-        return f"{self.size_mb:.1f} MB"
+        return format_bytes(self.size_bytes)
 
 
 def video_to_dict(video: VideoInfo) -> dict:
@@ -118,15 +116,8 @@ class MomentGroup:
         return sum(v.size_bytes for v in self.videos)
 
     @property
-    def total_size_gb(self) -> float:
-        return self.total_size_bytes / (1024 ** 3)
-
-    @property
     def total_size_formatted(self) -> str:
-        gb = self.total_size_gb
-        if gb >= 1:
-            return f"{gb:.2f} GB"
-        return f"{self.total_size_bytes / (1024 ** 2):.1f} MB"
+        return format_bytes(self.total_size_bytes)
 
     @property
     def date_range(self) -> str:
@@ -282,6 +273,11 @@ class SessionState:
         return self.total_deleted if self.delete_enabled else self.total_archived
 
     @property
+    def completion_label(self) -> str:
+        """'Deleted' or 'Archived' depending on delete mode."""
+        return "Deleted" if self.delete_enabled else "Archived"
+
+    @property
     def batches_completed(self) -> int:
         """Number of completed batches."""
         return len([b for b in self.batches if b.is_complete])
@@ -297,6 +293,14 @@ class SessionState:
         """Mark current batch as complete."""
         if self.current_batch:
             self.current_batch.completed_at = datetime.now()
+
+
+def format_bytes(n: int) -> str:
+    """Format byte count as human-readable string."""
+    gb = n / (1024 ** 3)
+    if gb >= 1:
+        return f"{gb:.2f} GB"
+    return f"{n / (1024 ** 2):.1f} MB"
 
 
 def filter_ambiguous_filenames(
