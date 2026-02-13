@@ -57,42 +57,21 @@ class VideoInfo:
 
 def video_to_dict(video: VideoInfo) -> dict:
     """Serialize VideoInfo to a JSON-friendly dict."""
-    return {
-        "uuid": video.uuid,
-        "filename": video.filename,
-        "original_filename": video.original_filename,
-        "date_created": video.date_created.isoformat(),
-        "date_modified": video.date_modified.isoformat(),
-        "size_bytes": video.size_bytes,
-        "duration_seconds": video.duration_seconds,
-        "width": video.width,
-        "height": video.height,
-        "location": video.location,
-        "place_name": video.place_name,
-        "moment_name": video.moment_name,
-        "moment_pk": video.moment_pk,
-        "is_local": video.is_local,
-    }
+    d = {f.name: getattr(video, f.name) for f in video.__dataclass_fields__.values()}
+    d["date_created"] = video.date_created.isoformat()
+    d["date_modified"] = video.date_modified.isoformat()
+    return d
 
 
 def video_from_dict(data: dict) -> VideoInfo:
     """Deserialize VideoInfo from a dict."""
-    return VideoInfo(
-        uuid=data["uuid"],
-        filename=data.get("filename") or "unknown",
-        original_filename=data.get("original_filename") or data.get("filename") or "unknown",
-        date_created=datetime.fromisoformat(data["date_created"]),
-        date_modified=datetime.fromisoformat(data["date_modified"]),
-        size_bytes=data["size_bytes"],
-        duration_seconds=data.get("duration_seconds", 0.0),
-        width=data.get("width", 0),
-        height=data.get("height", 0),
-        location=tuple(data["location"]) if data.get("location") else None,
-        place_name=data.get("place_name"),
-        moment_name=data.get("moment_name", ""),
-        moment_pk=data.get("moment_pk"),
-        is_local=data.get("is_local", True),
-    )
+    data = dict(data)
+    data["date_created"] = datetime.fromisoformat(data["date_created"])
+    data["date_modified"] = datetime.fromisoformat(data["date_modified"])
+    if data.get("location"):
+        data["location"] = tuple(data["location"])
+    valid = {f.name for f in VideoInfo.__dataclass_fields__.values()}
+    return VideoInfo(**{k: v for k, v in data.items() if k in valid})
 
 
 @dataclass
@@ -293,6 +272,98 @@ class SessionState:
         """Mark current batch as complete."""
         if self.current_batch:
             self.current_batch.completed_at = datetime.now()
+
+    def to_dict(self) -> dict:
+        """Serialize session to JSON-friendly dict."""
+        return {
+            "session_id": self.session_id,
+            "staging_path": str(self.staging_path),
+            "external_path": str(self.external_path),
+            "created_at": self.created_at.isoformat(),
+            "threshold_mb": self.threshold_mb,
+            "min_age_days": self.min_age_days,
+            "min_size_mb": self.min_size_mb,
+            "use_moments": self.use_moments,
+            "batch_size": self.batch_size,
+            "export_timeout": self.export_timeout,
+            "delete_timeout": self.delete_timeout,
+            "delete_enabled": self.delete_enabled,
+            "allow_ambiguous": self.allow_ambiguous,
+            "library_path": self.library_path,
+            "manifest_path": self.manifest_path,
+            "all_selected_uuids": self.all_selected_uuids,
+            "remaining_uuids": self.remaining_uuids,
+            "failed_export_uuids": self.failed_export_uuids,
+            "failed_delete_uuids": self.failed_delete_uuids,
+            "current_batch_number": self.current_batch_number,
+            "total_exported": self.total_exported,
+            "total_archived": self.total_archived,
+            "total_deleted": self.total_deleted,
+            "total_failed_exports": self.total_failed_exports,
+            "total_failed_deletes": self.total_failed_deletes,
+            "videos": [video_to_dict(v) for v in self.videos],
+            "batches": [
+                {
+                    "batch_number": b.batch_number,
+                    "selected_uuids": b.selected_uuids,
+                    "exported_uuids": b.exported_uuids,
+                    "archived_uuids": b.archived_uuids,
+                    "deleted_uuids": b.deleted_uuids,
+                    "failed_exports": b.failed_exports,
+                    "failed_deletes": b.failed_deletes,
+                    "checksums": b.checksums,
+                    "started_at": b.started_at.isoformat(),
+                    "completed_at": b.completed_at.isoformat() if b.completed_at else None,
+                }
+                for b in self.batches
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SessionState":
+        """Deserialize session from a dict."""
+        session = cls(
+            session_id=data["session_id"],
+            staging_path=Path(data["staging_path"]),
+            external_path=Path(data["external_path"]),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            threshold_mb=data.get("threshold_mb"),
+            min_age_days=data.get("min_age_days"),
+            min_size_mb=data.get("min_size_mb"),
+            use_moments=data.get("use_moments", True),
+            batch_size=data.get("batch_size"),
+            export_timeout=data.get("export_timeout", 1800),
+            delete_timeout=data.get("delete_timeout", 120),
+            delete_enabled=data.get("delete_enabled", True),
+            allow_ambiguous=data.get("allow_ambiguous", False),
+            library_path=data.get("library_path"),
+            manifest_path=data.get("manifest_path"),
+            all_selected_uuids=data["all_selected_uuids"],
+            remaining_uuids=data["remaining_uuids"],
+            failed_export_uuids=data.get("failed_export_uuids", []),
+            failed_delete_uuids=data.get("failed_delete_uuids", []),
+            current_batch_number=data["current_batch_number"],
+            total_exported=data["total_exported"],
+            total_archived=data["total_archived"],
+            total_deleted=data["total_deleted"],
+            total_failed_exports=data.get("total_failed_exports", 0),
+            total_failed_deletes=data.get("total_failed_deletes", 0),
+        )
+        session.videos = [video_from_dict(v) for v in data.get("videos", [])]
+        for bd in data.get("batches", []):
+            session.batches.append(BatchProgress(
+                batch_number=bd["batch_number"],
+                selected_uuids=bd.get("selected_uuids", []),
+                exported_uuids=bd.get("exported_uuids", []),
+                archived_uuids=bd.get("archived_uuids", []),
+                deleted_uuids=bd.get("deleted_uuids", []),
+                failed_exports=bd.get("failed_exports", {}),
+                failed_deletes=bd.get("failed_deletes", {}),
+                checksums=bd.get("checksums", {}),
+                started_at=datetime.fromisoformat(bd["started_at"]),
+                completed_at=datetime.fromisoformat(bd["completed_at"]) if bd.get("completed_at") else None,
+            ))
+        return session
 
 
 def format_bytes(n: int) -> str:

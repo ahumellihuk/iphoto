@@ -6,7 +6,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from uuid import uuid4
 
 import typer
 from rich.console import Console
@@ -16,7 +15,7 @@ from . import __version__
 from .deleter import delete_from_photos
 from .exporter import export_videos, calculate_batch_size, compute_sha256
 from .manifest import append_manifest_entries, build_manifest_entry, load_manifest
-from .models import VideoInfo, MomentGroup, SessionState, BatchProgress, video_to_dict, video_from_dict, format_bytes
+from .models import VideoInfo, MomentGroup, SessionState, BatchProgress, format_bytes
 from .mover import DEFAULT_EXTERNAL_PATH, check_external_mounted, cleanup_staging, move_to_archive
 from .scanner import rank_videos, scan_videos, group_by_moment
 from .selector import display_summary, display_videos, format_total_size, interactive_select, interactive_select_moments, display_moments
@@ -35,50 +34,7 @@ SESSION_FILE = Path.home() / ".iphoto_session.json"
 def save_session(session: SessionState) -> None:
     """Save multi-batch session state for resumption."""
     try:
-        data = {
-            "session_id": session.session_id,
-            "staging_path": str(session.staging_path),
-            "external_path": str(session.external_path),
-            "created_at": session.created_at.isoformat(),
-            "threshold_mb": session.threshold_mb,
-            "min_age_days": session.min_age_days,
-            "min_size_mb": session.min_size_mb,
-            "use_moments": session.use_moments,
-            "batch_size": session.batch_size,
-            "export_timeout": session.export_timeout,
-            "delete_timeout": session.delete_timeout,
-            "delete_enabled": session.delete_enabled,
-            "allow_ambiguous": session.allow_ambiguous,
-            "library_path": session.library_path,
-            "manifest_path": session.manifest_path,
-            "all_selected_uuids": session.all_selected_uuids,
-            "remaining_uuids": session.remaining_uuids,
-            "failed_export_uuids": session.failed_export_uuids,
-            "failed_delete_uuids": session.failed_delete_uuids,
-            "current_batch_number": session.current_batch_number,
-            "total_exported": session.total_exported,
-            "total_archived": session.total_archived,
-            "total_deleted": session.total_deleted,
-            "total_failed_exports": session.total_failed_exports,
-            "total_failed_deletes": session.total_failed_deletes,
-            "videos": [video_to_dict(v) for v in session.videos],
-            "batches": [
-                {
-                    "batch_number": b.batch_number,
-                    "selected_uuids": b.selected_uuids,
-                    "exported_uuids": b.exported_uuids,
-                    "archived_uuids": b.archived_uuids,
-                    "deleted_uuids": b.deleted_uuids,
-                    "failed_exports": b.failed_exports,
-                    "failed_deletes": b.failed_deletes,
-                    "checksums": b.checksums,
-                    "started_at": b.started_at.isoformat(),
-                    "completed_at": b.completed_at.isoformat() if b.completed_at else None,
-                }
-                for b in session.batches
-            ],
-        }
-        SESSION_FILE.write_text(json.dumps(data, indent=2))
+        SESSION_FILE.write_text(json.dumps(session.to_dict(), indent=2))
     except Exception as e:
         console.print(f"[yellow]Warning: Could not save session: {e}[/yellow]")
 
@@ -87,55 +43,8 @@ def load_session() -> Optional[SessionState]:
     """Load multi-batch session state for resumption."""
     if not SESSION_FILE.exists():
         return None
-
     try:
-        data = json.loads(SESSION_FILE.read_text())
-        session = SessionState(
-            session_id=data["session_id"],
-            staging_path=Path(data["staging_path"]),
-            external_path=Path(data["external_path"]),
-            created_at=datetime.fromisoformat(data["created_at"]),
-            threshold_mb=data.get("threshold_mb"),
-            min_age_days=data.get("min_age_days"),
-            min_size_mb=data.get("min_size_mb"),
-            use_moments=data.get("use_moments", True),
-            batch_size=data.get("batch_size"),
-            export_timeout=data.get("export_timeout", 1800),
-            delete_timeout=data.get("delete_timeout", 120),
-            delete_enabled=data.get("delete_enabled", True),
-            allow_ambiguous=data.get("allow_ambiguous", False),
-            library_path=data.get("library_path"),
-            manifest_path=data.get("manifest_path"),
-            all_selected_uuids=data["all_selected_uuids"],
-            remaining_uuids=data["remaining_uuids"],
-            failed_export_uuids=data.get("failed_export_uuids", []),
-            failed_delete_uuids=data.get("failed_delete_uuids", []),
-            current_batch_number=data["current_batch_number"],
-            total_exported=data["total_exported"],
-            total_archived=data["total_archived"],
-            total_deleted=data["total_deleted"],
-            total_failed_exports=data.get("total_failed_exports", 0),
-            total_failed_deletes=data.get("total_failed_deletes", 0),
-        )
-        session.videos = [video_from_dict(v) for v in data.get("videos", [])]
-
-        # Reconstruct batches
-        for batch_data in data.get("batches", []):
-            batch = BatchProgress(
-                batch_number=batch_data["batch_number"],
-                selected_uuids=batch_data.get("selected_uuids", []),
-                exported_uuids=batch_data.get("exported_uuids", []),
-                archived_uuids=batch_data.get("archived_uuids", []),
-                deleted_uuids=batch_data.get("deleted_uuids", []),
-                failed_exports=batch_data.get("failed_exports", {}),
-                failed_deletes=batch_data.get("failed_deletes", {}),
-                checksums=batch_data.get("checksums", {}),
-                started_at=datetime.fromisoformat(batch_data["started_at"]),
-                completed_at=datetime.fromisoformat(batch_data["completed_at"]) if batch_data.get("completed_at") else None,
-            )
-            session.batches.append(batch)
-
-        return session
+        return SessionState.from_dict(json.loads(SESSION_FILE.read_text()))
     except Exception as e:
         console.print(f"[yellow]Warning: Could not load session: {e}[/yellow]")
         return None
