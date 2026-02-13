@@ -298,3 +298,28 @@ class SessionState:
         """Mark current batch as complete."""
         if self.current_batch:
             self.current_batch.completed_at = datetime.now()
+
+
+def filter_ambiguous_filenames(
+    videos: list[VideoInfo],
+    allow_ambiguous: bool = False,
+) -> tuple[list[VideoInfo], dict[str, str]]:
+    """Filter out videos with duplicate original filenames.
+
+    Returns (safe_videos, failures) where failures maps uuid -> reason.
+    """
+    if allow_ambiguous:
+        return videos, {}
+
+    filename_map: dict[str, list[VideoInfo]] = {}
+    for video in videos:
+        filename_map.setdefault(video.original_filename, []).append(video)
+
+    failures: dict[str, str] = {}
+    for fn, vids in filename_map.items():
+        if len(vids) > 1:
+            for video in vids:
+                failures[video.uuid] = f"Ambiguous filename '{fn}' (matches {len(vids)} items)"
+
+    safe_videos = [v for v in videos if v.uuid not in failures]
+    return safe_videos, failures

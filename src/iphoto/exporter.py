@@ -353,18 +353,9 @@ def export_videos(
         console.print("[yellow]No videos to export[/yellow]")
         return {}, {}
 
-    # Guard against ambiguous filenames
-    filename_map: dict[str, list[VideoInfo]] = {}
-    for video in videos:
-        filename_map.setdefault(video.original_filename, []).append(video)
-    ambiguous = {fn: vids for fn, vids in filename_map.items() if len(vids) > 1}
-
-    pre_failures: dict[str, str] = {}
-    if ambiguous and not allow_ambiguous:
-        for fn, vids in ambiguous.items():
-            for video in vids:
-                pre_failures[video.uuid] = f"Ambiguous filename '{fn}' (matches {len(vids)} items)"
-        videos = [v for v in videos if v.uuid not in pre_failures]
+    from .models import filter_ambiguous_filenames
+    videos, pre_failures = filter_ambiguous_filenames(videos, allow_ambiguous)
+    if pre_failures:
         console.print(
             f"[yellow]Skipped {len(pre_failures)} videos with duplicate filenames. Use --allow-ambiguous to override.[/yellow]"
         )
