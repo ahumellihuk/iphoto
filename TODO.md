@@ -94,7 +94,6 @@
 
 - [ ] **Performance optimization**
   - Profile export bottlenecks
-  - Optimize parallel workers
   - Reduce Photos.app calls
 
 ## 🟢 Nice to Have - Features
@@ -138,11 +137,15 @@
   - debug_*.py files
   - /tmp output directories
 
-- [ ] **Code cleanup**
-  - Remove unused imports
-  - Fix "claude" typo artifact (already done in scanner.py)
-  - Consistent error handling
-  - Type hints everywhere
+- [x] **Code cleanup** (completed in v0.2.0a1 codebase overhaul)
+  - Removed unused imports and function decomposition
+  - Removed dead `BatchState` code (replaced by `SessionState` + `BatchProgress`)
+  - Extracted `ExportResult` NamedTuple and `_poll_for_file` helper in applescript_exporter.py
+  - Extracted `filter_ambiguous_filenames` shared utility in models.py
+  - Decomposed `archive()`, `interactive_select_moments()` into smaller helpers
+  - Extracted `format_threshold` helper in selector.py
+  - Fixed undefined `video` variable bug in cli.py batch size adjustment
+  - Removed `settle_delay_seconds` and `max_workers` params (sequential export enforced)
 
 - [ ] **Repository structure**
   - Move tests to tests/ directory
@@ -205,7 +208,7 @@
 
 **Performance:**
 - [ ] Handles 1000+ video libraries
-- [ ] Parallel export working
+- [ ] Sequential export reliable
 - [ ] Reasonable memory usage
 - [ ] Network efficiency for iCloud
 

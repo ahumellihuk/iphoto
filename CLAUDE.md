@@ -24,7 +24,9 @@ Solve the iCloud photo storage problem: users have massive video libraries in iC
 3. **Exporter** (`exporter.py`, `applescript_exporter.py`)
    - **Current approach**: AppleScript-based export via Photos.app
    - **Previous approach**: osxphotos library (replaced due to iCloud issues)
-   - Parallel export with progress tracking
+   - Sequential export enforced (no `max_workers` param; parallel was removed for reliability)
+   - `ExportResult` NamedTuple wraps export outcomes (replaces raw tuples)
+   - `_poll_for_file` helper extracted for post-export file verification
    - Checksum verification
 
 4. **Mover** (`mover.py`)
@@ -36,7 +38,11 @@ Solve the iCloud photo storage problem: users have massive video libraries in iC
    - Removes archived videos from Photos library
    - Safety checks and verification
 
-6. **Manifest** (`manifest.py`)
+6. **Shared Utilities** (`models.py`)
+   - `filter_ambiguous_filenames` — deduplicates videos with non-unique original filenames (used by exporter and deleter)
+   - `SessionState` / `BatchProgress` — session persistence (replaced old `BatchState`)
+
+7. **Manifest** (`manifest.py`)
    - JSONL manifest of all archived videos
    - Enables search and recovery of archived content
 
@@ -128,7 +134,7 @@ end tell
 
 3. ✅ **Full workflow (scan → select → export → move → delete)**
    - All components integrate correctly
-   - State management and resumption logic in place
+   - State management via `SessionState` + `BatchProgress` with resumption logic
    - Manifest generation works
 
 ### What's Broken
@@ -156,10 +162,11 @@ end tell
 
 2. Selector → User chooses videos/moments
 
-3. Exporter → AppleScript export
+3. Exporter → AppleScript export (sequential)
    - Uses original_filename to lookup in Photos.app
+   - Ambiguous filenames filtered via shared filter_ambiguous_filenames (models.py)
    - Photos.app exports to staging directory
-   - Verifies file appeared via polling
+   - Verifies file appeared via _poll_for_file helper
 
 4. Mover → Copy to external storage
    - Organized by moment folders
@@ -188,6 +195,7 @@ end tell
 **Runtime:**
 - Python 3.11+
 - osxphotos 0.74.2+ (for database reading)
+- photoscript (AppleScript bridge for Photos.app)
 - Photos.app (macOS system app)
 - typer, rich (CLI/TUI)
 
@@ -296,12 +304,17 @@ iphoto archive --dry-run --min-size 2000
    - Poll for file existence
    - Check file size > 0
 
+5. **Note decomposed CLI helpers**
+   - `archive()` is split into `_resume_or_create_session`, `_export_batch_phase`, `_archive_batch_phase`
+   - `interactive_select_moments` is split into `_display_selection_summary`, `_display_moment_commands`, `_confirm_moment_selection`
+   - `format_threshold` helper extracted in selector.py
+
 ### Code Style
 
 - Type hints on all functions
 - Rich console for user feedback
 - Comprehensive error handling
-- State persistence for resumability
+- State persistence for resumability (via `SessionState` + `BatchProgress`)
 
 ## Historical Context
 
@@ -377,6 +390,7 @@ python test_local_video.py
 
 ---
 
-**Last Updated:** 2026-01-30
+**Last Updated:** 2026-02-13
+**Version:** 0.2.0a1
 **Status:** Active development - investigating AppleScript export reliability
 **Primary Issue:** iCloud video export not working despite AppleScript success messages

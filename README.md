@@ -48,7 +48,7 @@ This tool helps you:
 
 ### Robust Processing
 - **Batch processing**: Handle thousands of videos
-- **Parallel export**: Fast multi-threaded exports
+- **Sequential export**: Reliable AppleScript-based exports
 - **Resume capability**: Pick up where you left off
 - **Error handling**: Retry failed exports/deletions
 
@@ -92,7 +92,7 @@ This tool helps you:
            │
            │ ③ Exporter (AppleScript/osxphotos)
            │    - Exports from Photos.app
-           │    - Parallel processing
+           │    - Sequential processing
            ↓
     ┌──────────────────────┐
     │ Staging Directory    │
@@ -159,9 +159,6 @@ iphoto archive -s ~/staging -e /Volumes/MyDrive/archive
 # Skip deletion (archive only)
 iphoto archive --no-delete
 
-# Parallel workers
-iphoto archive --workers 4
-
 # Resume interrupted session
 iphoto resume
 ```
@@ -191,7 +188,6 @@ iphoto retry-failed
 DEFAULT_STAGING = ~/PhotosStaging
 DEFAULT_EXTERNAL = /Volumes/AcerFA200/Photos-Archive
 DEFAULT_THRESHOLD = 100 MB
-DEFAULT_WORKERS = 4
 DEFAULT_TIMEOUT = 1800s (30min for iCloud downloads)
 ```
 
@@ -295,10 +291,6 @@ iphoto/
 │   ├── deleter.py             # Delete from Photos
 │   ├── manifest.py            # Manifest management
 │   └── models.py              # Data models
-├── tests/
-│   ├── test_export2.py        # Filename validation tests
-│   ├── test_local_video.py    # Local export test
-│   └── test_icloud_export.py  # iCloud diagnostic test
 ├── CLAUDE.md                  # Complete project context
 ├── INVESTIGATION.md           # Current issue investigation
 └── README.md                  # This file
@@ -306,17 +298,12 @@ iphoto/
 
 ### Running Tests
 
+Test files (test_*.py, debug_*.py) are gitignored and not included in the repository.
+If you have local test scripts, run them from the project root:
+
 ```bash
 source .venv/bin/activate
-
-# Validate filename lookup
-python test_export2.py
-
-# Test local video export
 python test_local_video.py
-
-# Test iCloud export (currently failing)
-python test_icloud_export.py
 ```
 
 ### Contributing
@@ -333,6 +320,7 @@ python test_icloud_export.py
 - Python 3.11+
 - Photos.app
 - osxphotos library
+- photoscript library
 - External storage drive
 
 ## License
@@ -357,5 +345,5 @@ MIT
 ---
 
 **Status:** Active development - local archival works, iCloud export under investigation
-**Version:** 0.2.0-alpha
-**Last Updated:** 2026-01-30
+**Version:** 0.2.0a1
+**Last Updated:** 2026-02-13
