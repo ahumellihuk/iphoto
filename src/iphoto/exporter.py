@@ -1,20 +1,15 @@
 """Export videos from Photos library using AppleScript."""
 
 import hashlib
-import os
 import shutil
 import time
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from threading import Lock
 from typing import Optional
 
 from rich.console import Console
 from rich.progress import (
     BarColumn,
     Progress,
-    SpinnerColumn,
     TaskProgressColumn,
     TextColumn,
     TimeRemainingColumn,
@@ -24,46 +19,6 @@ from .models import VideoInfo, filter_ambiguous_filenames
 from .applescript_exporter import activate_photos, export_via_applescript
 
 console = Console()
-
-
-class TimingStats:
-    """Track timing statistics for ETA calculation."""
-
-    def __init__(self, window_size: int = 5):
-        """Initialize timing stats with moving window."""
-        self.window_size = window_size
-        self.times: deque = deque(maxlen=window_size)
-        self.start_time = time.time()
-
-    def add_time(self, seconds: float) -> None:
-        """Add a measured time to the window."""
-        self.times.append(seconds)
-
-    @property
-    def avg_time(self) -> float:
-        """Get average time from window."""
-        if not self.times:
-            return 0.0
-        return sum(self.times) / len(self.times)
-
-    def estimate_remaining(self, remaining_count: int) -> float:
-        """Estimate seconds remaining for remaining items."""
-        if not self.times:
-            return 0.0
-        return self.avg_time * remaining_count
-
-    def format_eta(self, remaining_seconds: float) -> str:
-        """Format seconds into human-readable ETA."""
-        if remaining_seconds <= 0:
-            return "Done"
-        hours, remainder = divmod(int(remaining_seconds), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        if hours > 0:
-            return f"{hours}h {minutes}m"
-        elif minutes > 0:
-            return f"{minutes}m {seconds}s"
-        else:
-            return f"{seconds}s"
 
 
 def compute_sha256(file_path: Path) -> str:
@@ -83,175 +38,100 @@ def sanitize_folder_name(name: str) -> str:
     return name.strip()
 
 
-class ParallelExporter:
-    """Export videos using AppleScript (sequential by default for reliability)."""
+def _export_single_video(
+    video: VideoInfo,
+    staging_path: Path,
+    timeout_seconds: int = 1800,
+    icloud_timeout_seconds: Optional[int] = None,
+) -> tuple[str, Optional[tuple[Path, str]], Optional[str]]:
+    """Export one video via AppleScript.
 
-    def __init__(self, max_workers: int = 1, staging_path: Path = None):
-        """Initialize exporter.
+    Returns: (uuid, (path, checksum) or None, error or None)
+    """
+    try:
+        export_dir = staging_path / sanitize_folder_name(video.moment_name or "Unknown")
+        export_dir.mkdir(parents=True, exist_ok=True)
 
-        Args:
-            max_workers: Maximum number of concurrent export tasks (default: 1 for AppleScript reliability)
-                        AppleScript API is sequential and flaky, so parallel workers may cause issues.
-            staging_path: Path to staging directory
-        """
-        self.max_workers = max_workers
-        self.staging_path = staging_path
-        self.progress_lock = Lock()
+        # Skip if already exported with correct size
+        existing = export_dir / video.original_filename
+        if existing.exists() and existing.stat().st_size == video.size_bytes:
+            return video.uuid, (existing, compute_sha256(existing)), None
 
-    def export_video_task(
-        self,
-        video: VideoInfo,
-        staging_path: Path,
-        library_path: Optional[str] = None,
-        timeout_seconds: int = 1800,
-        icloud_timeout_seconds: Optional[int] = None,
-    ) -> tuple[str, Optional[tuple[Path, str]], Optional[str]]:
-        """Single video export task using AppleScript.
+        effective_timeout = timeout_seconds
+        if not video.is_local:
+            effective_timeout = max(timeout_seconds, icloud_timeout_seconds or 3600)
 
-        Returns: (uuid, (path, checksum) or None, error_message or None)
-        """
-        try:
-            # Create moment folder
-            moment_folder = sanitize_folder_name(video.moment_name or "Unknown")
-            export_dir = staging_path / moment_folder
-            export_dir.mkdir(parents=True, exist_ok=True)
+        success, exported_path, error_msg = export_via_applescript(
+            uuid=video.uuid,
+            filename=video.original_filename,
+            output_dir=export_dir,
+            timeout=effective_timeout,
+            max_retries=3,
+            delay_between_retries=1.0,
+            post_export_wait_seconds=90 if not video.is_local else 30,
+            post_export_poll_seconds=2.0 if not video.is_local else 1.0,
+        )
 
-            # Skip re-export if file already exists in staging with correct size
-            existing = export_dir / video.original_filename
-            if existing.exists() and existing.stat().st_size == video.size_bytes:
-                checksum = compute_sha256(existing)
-                return video.uuid, (existing, checksum), None
+        if not success:
+            return video.uuid, None, error_msg
+        if not exported_path or not exported_path.exists():
+            return video.uuid, None, "Export reported success but file not found"
 
-            # Export video via AppleScript
-            activate_photos()
-            effective_timeout = timeout_seconds
-            if not video.is_local:
-                if icloud_timeout_seconds:
-                    effective_timeout = max(timeout_seconds, icloud_timeout_seconds)
-                else:
-                    effective_timeout = max(timeout_seconds, 3600)
-            # Use UUID for precise lookup (avoids duplicate filename issues)
-            success, exported_path, error_msg = export_via_applescript(
-                uuid=video.uuid,
-                filename=video.original_filename,
-                output_dir=export_dir,
-                timeout=effective_timeout,
-                max_retries=3,
-                delay_between_retries=1.0,
-                post_export_wait_seconds=90 if not video.is_local else 30,
-                post_export_poll_seconds=2.0 if not video.is_local else 1.0,
+        return video.uuid, (exported_path, compute_sha256(exported_path)), None
+
+    except Exception as e:
+        return video.uuid, None, f"Exception: {str(e)[:200]}"
+
+
+def _export_batch(
+    videos: list[VideoInfo],
+    staging_path: Path,
+    timeout_seconds: int = 1800,
+    icloud_timeout_seconds: Optional[int] = None,
+) -> tuple[dict[str, tuple[Path, str]], dict[str, str]]:
+    """Export videos sequentially with progress tracking.
+
+    Returns: (successful_exports, failed_exports)
+    """
+    results: dict[str, tuple[Path, str]] = {}
+    failures: dict[str, str] = {}
+
+    if not videos:
+        return results, failures
+
+    activate_photos()
+    batch_start = time.time()
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Exporting...", total=len(videos))
+
+        for i, video in enumerate(videos):
+            uuid, result, error = _export_single_video(
+                video, staging_path, timeout_seconds, icloud_timeout_seconds,
             )
 
-            if not success:
-                return video.uuid, None, error_msg
+            if error:
+                failures[uuid] = error
+                console.print(f"[yellow]✗ {video.original_filename}: {error}[/yellow]")
+            else:
+                results[uuid] = result
+                console.print(f"[green]✓ {video.original_filename}[/green]")
 
-            # Verify exported file exists
-            if not exported_path or not exported_path.exists():
-                return video.uuid, None, "Export reported success but file not found"
+            progress.update(task, description=f"Exporting — {i + 1}/{len(videos)}")
+            progress.advance(task)
 
-            # Compute checksum of exported file
-            checksum = compute_sha256(exported_path)
-            return video.uuid, (exported_path, checksum), None
+    total_time = time.time() - batch_start
+    success_rate = len(results) / len(videos) * 100 if videos else 0
+    console.print(f"\n[dim]Batch summary: {len(results)}/{len(videos)} exported "
+                 f"in {total_time:.1f}s ({success_rate:.0f}% success)[/dim]")
 
-        except Exception as e:
-            error_msg = f"Exception: {str(e)[:200]}"
-            return video.uuid, None, error_msg
-
-    def export_batch(
-        self,
-        videos: list[VideoInfo],
-        staging_path: Path,
-        library_path: Optional[str] = None,
-        timeout_seconds: int = 1800,
-        icloud_timeout_seconds: Optional[int] = None,
-    ) -> tuple[dict[str, tuple[Path, str]], dict[str, str]]:
-        """Export videos in parallel with timing and ETA.
-
-        Returns: (successful_exports, failed_exports)
-        """
-        results: dict[str, tuple[Path, str]] = {}
-        failures: dict[str, str] = {}
-
-        if not videos:
-            return results, failures
-
-        timing_stats = TimingStats(window_size=min(5, len(videos)))
-        completed_count = 0
-        batch_start = time.time()
-
-        activate_photos()
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit all video exports as tasks
-            future_to_video = {
-                executor.submit(
-                    self.export_video_task,
-                    video,
-                    staging_path,
-                    library_path,
-                    timeout_seconds,
-                    icloud_timeout_seconds,
-                ): video
-                for video in videos
-            }
-
-            # Process completions with progress tracking
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                TimeRemainingColumn(),
-                console=console,
-            ) as progress:
-                task = progress.add_task(
-                    f"Exporting...",
-                    total=len(videos),
-                )
-
-                for future in as_completed(future_to_video):
-                    video = future_to_video[future]
-                    uuid, result, error = future.result()
-
-                    completed_count += 1
-                    remaining_count = len(videos) - completed_count
-
-                    video_elapsed = time.time() - batch_start
-                    per_video = video_elapsed / completed_count if completed_count > 0 else 0
-
-                    with self.progress_lock:
-                        if error:
-                            failures[uuid] = error
-                            console.print(f"[yellow]✗ {video.original_filename}: {error}[/yellow]")
-                        else:
-                            results[uuid] = result
-                            timing_stats.add_time(per_video)
-                            console.print(f"[green]✓ {video.original_filename}[/green]")
-
-                        # Update progress description with ETA
-                        if remaining_count > 0:
-                            estimated_remaining = timing_stats.estimate_remaining(remaining_count)
-                            eta_str = timing_stats.format_eta(estimated_remaining)
-                            elapsed_sec = time.time() - batch_start
-                            progress.update(
-                                task,
-                                description=f"Exporting — "
-                                           f"{completed_count}/{len(videos)} — ETA: {eta_str}"
-                            )
-                        else:
-                            progress.update(
-                                task,
-                                description=f"Exporting — "
-                                           f"{completed_count}/{len(videos)} — Done"
-                            )
-                        progress.advance(task)
-
-            # Batch summary
-            total_time = time.time() - batch_start
-            success_rate = len(results) / len(videos) * 100 if videos else 0
-            console.print(f"\n[dim]Batch summary: {len(results)}/{len(videos)} exported in {total_time:.1f}s "
-                         f"({success_rate:.0f}% success)[/dim]")
-
-        return results, failures
+    return results, failures
 
 
 def calculate_batch_size(
@@ -364,13 +244,11 @@ def export_videos(
         console.print("[dim]  • Verify Photos.app is running and not paused for sync[/dim]")
         console.print("[dim]  • Check that videos are accessible in Photos.app[/dim]\n")
 
-    # Use ParallelExporter for sequential export (AppleScript is inherently sequential)
-    exporter = ParallelExporter(max_workers=1, staging_path=staging_path)
+    # Export sequentially (AppleScript is inherently sequential)
     icloud_timeout_seconds = max(timeout_seconds, 3600)
-    results, failures = exporter.export_batch(
+    results, failures = _export_batch(
         videos=videos,
         staging_path=staging_path,
-        library_path=library_path,
         timeout_seconds=timeout_seconds,
         icloud_timeout_seconds=icloud_timeout_seconds,
     )
