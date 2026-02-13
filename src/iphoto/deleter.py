@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm
 
-from .models import VideoInfo
+from .models import VideoInfo, filter_ambiguous_filenames
 
 console = Console()
 
@@ -34,7 +34,6 @@ def delete_from_photos(
     if not videos:
         return [], {}
 
-    from .models import filter_ambiguous_filenames
     videos, failures = filter_ambiguous_filenames(videos, allow_ambiguous)
     if failures:
         console.print(

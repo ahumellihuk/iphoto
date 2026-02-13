@@ -20,7 +20,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from .models import VideoInfo
+from .models import VideoInfo, filter_ambiguous_filenames
 from .applescript_exporter import activate_photos, export_via_applescript
 
 console = Console()
@@ -257,7 +257,6 @@ class ParallelExporter:
 def calculate_batch_size(
     staging_path: Path,
     remaining_videos: list[VideoInfo],
-    max_workers: int = 4,
     override_size: Optional[int] = None,
 ) -> int:
     """Calculate optimal batch size based on available staging space.
@@ -266,13 +265,11 @@ def calculate_batch_size(
     - Get available staging space with 70% safety margin
     - Calculate average video size from remaining videos
     - Compute how many videos fit in available space
-    - Apply worker multiple (don't queue too far ahead)
     - Minimum 1 video, maximum remaining video count
 
     Args:
         staging_path: Path to staging directory
         remaining_videos: List of VideoInfo objects to process
-        max_workers: Number of parallel workers (batch size shouldn't exceed this × 2)
         override_size: If provided, use this size instead of calculating
 
     Returns:
@@ -312,7 +309,7 @@ def calculate_batch_size(
 
     except Exception as e:
         console.print(f"[yellow]Warning: Could not calculate batch size: {e}[/yellow]")
-        return max(1, min(len(remaining_videos), max_workers * 2))
+        return min(len(remaining_videos), 5)
 
 
 def export_videos(
@@ -348,7 +345,6 @@ def export_videos(
         console.print("[yellow]No videos to export[/yellow]")
         return {}, {}
 
-    from .models import filter_ambiguous_filenames
     videos, pre_failures = filter_ambiguous_filenames(videos, allow_ambiguous)
     if pre_failures:
         console.print(

@@ -227,7 +227,6 @@ class SessionState:
     created_at: datetime = field(default_factory=datetime.now)
 
     # Configuration
-    max_workers: int = 4
     threshold_mb: Optional[float] = None
     min_age_days: Optional[int] = None
     min_size_mb: Optional[float] = None

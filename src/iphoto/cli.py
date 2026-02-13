@@ -17,9 +17,9 @@ from .deleter import delete_from_photos
 from .exporter import export_videos, calculate_batch_size, compute_sha256
 from .manifest import append_manifest_entries, build_manifest_entry, load_manifest
 from .models import VideoInfo, MomentGroup, SessionState, BatchProgress, video_to_dict, video_from_dict
-from .mover import DEFAULT_EXTERNAL_PATH, cleanup_staging, move_to_archive
+from .mover import DEFAULT_EXTERNAL_PATH, check_external_mounted, cleanup_staging, move_to_archive
 from .scanner import rank_videos, scan_videos, group_by_moment
-from .selector import display_summary, display_videos, interactive_select, interactive_select_moments, display_moments
+from .selector import display_summary, display_videos, format_total_size, interactive_select, interactive_select_moments, display_moments
 
 app = typer.Typer(
     name="iphoto",
@@ -40,7 +40,6 @@ def save_session(session: SessionState) -> None:
             "staging_path": str(session.staging_path),
             "external_path": str(session.external_path),
             "created_at": session.created_at.isoformat(),
-            "max_workers": session.max_workers,
             "threshold_mb": session.threshold_mb,
             "min_age_days": session.min_age_days,
             "min_size_mb": session.min_size_mb,
@@ -96,7 +95,6 @@ def load_session() -> Optional[SessionState]:
             staging_path=Path(data["staging_path"]),
             external_path=Path(data["external_path"]),
             created_at=datetime.fromisoformat(data["created_at"]),
-            max_workers=data["max_workers"],
             threshold_mb=data.get("threshold_mb"),
             min_age_days=data.get("min_age_days"),
             min_size_mb=data.get("min_size_mb"),
@@ -296,7 +294,6 @@ def _export_batch_phase(
     """Phase 1: Export videos from Photos to staging."""
     console.print(f"[bold]Phase 1:[/bold] Exporting {len(batch_videos)} videos...")
     if dry_run:
-        from .selector import format_total_size
         console.print("[cyan][DRY RUN] Would export the following videos:[/cyan]")
         for v in batch_videos:
             console.print(f"  [dim]- {v.original_filename} ({v.size_formatted})[/dim]")
@@ -450,12 +447,15 @@ def archive(
         return
     session, all_videos = result
 
+    # Use session paths (important for resume — CLI args may differ from saved session)
+    staging = session.staging_path
+    external = session.external_path
+
     # Ensure staging directory exists before disk usage checks
     staging.mkdir(parents=True, exist_ok=True)
 
     # Pre-flight check: verify external drive is mounted (skip in dry-run)
     if not dry_run:
-        from .mover import check_external_mounted
         if not check_external_mounted(external):
             console.print(f"[red]Error: External drive not mounted at {external}[/red]")
             console.print("[yellow]Connect the external drive and try again.[/yellow]")
