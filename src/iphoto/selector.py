@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from .models import VideoInfo, MomentGroup
+from .models import VideoInfo, MomentGroup, format_bytes
 from .scanner import rank_videos, rank_moments
 
 console = Console()
@@ -19,11 +19,7 @@ MOMENTS_PER_PAGE = 10
 
 def format_total_size(videos: list[VideoInfo]) -> str:
     """Format total size of videos."""
-    total_bytes = sum(v.size_bytes for v in videos)
-    gb = total_bytes / (1024 * 1024 * 1024)
-    if gb >= 1:
-        return f"{gb:.2f} GB"
-    return f"{total_bytes / (1024 * 1024):.1f} MB"
+    return format_bytes(sum(v.size_bytes for v in videos))
 
 
 def get_free_disk_space(path: Path) -> Optional[float]:

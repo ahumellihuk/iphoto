@@ -16,7 +16,7 @@ from . import __version__
 from .deleter import delete_from_photos
 from .exporter import export_videos, calculate_batch_size, compute_sha256
 from .manifest import append_manifest_entries, build_manifest_entry, load_manifest
-from .models import VideoInfo, MomentGroup, SessionState, BatchProgress, video_to_dict, video_from_dict
+from .models import VideoInfo, MomentGroup, SessionState, BatchProgress, video_to_dict, video_from_dict, format_bytes
 from .mover import DEFAULT_EXTERNAL_PATH, check_external_mounted, cleanup_staging, move_to_archive
 from .scanner import rank_videos, scan_videos, group_by_moment
 from .selector import display_summary, display_videos, format_total_size, interactive_select, interactive_select_moments, display_moments
@@ -218,10 +218,9 @@ def _resume_or_create_session(
     existing_session = load_session()
     if existing_session and not existing_session.is_complete:
         console.print(f"[bold cyan]Found interrupted session {existing_session.session_id}[/bold cyan]")
-        completion_label = "Deleted" if existing_session.delete_enabled else "Archived"
         console.print(
             f"  Progress: {existing_session.completed_count}/{len(existing_session.all_selected_uuids)} "
-            f"videos {completion_label.lower()}"
+            f"videos {existing_session.completion_label.lower()}"
         )
         console.print(f"  Batches completed: {existing_session.batches_completed}")
         if Confirm.ask("Resume this session?"):
@@ -512,8 +511,8 @@ def archive(
 
             if not batch_videos:
                 first_video = all_videos_map[session.remaining_uuids[0]]
-                console.print(f"[red]CRITICAL: Largest remaining video ({first_video.size_bytes / (1024**3):.2f} GB) "
-                             f"exceeds available space ({usable_bytes / (1024**3):.2f} GB)[/red]")
+                console.print(f"[red]CRITICAL: Largest remaining video ({format_bytes(first_video.size_bytes)}) "
+                             f"exceeds available space ({format_bytes(int(usable_bytes))})[/red]")
                 console.print("[red]Cannot proceed. Free up staging space and retry.[/red]")
                 return
 
@@ -522,14 +521,12 @@ def archive(
                          f"to fit available staging space[/yellow]")
 
         batch = session.add_batch(batch_num, batch_uuids)
-        total_size_gb = sum(v.size_bytes for v in batch_videos) / (1024 ** 3)
         estimated_batches = len(session.all_selected_uuids) // calculated_batch_size + 1
         console.print(f"\n[bold cyan]--- Batch {batch_num}/{estimated_batches} ---[/bold cyan]")
-        console.print(f"Videos: {len(batch_videos)} | Size: {total_size_gb:.2f} GB")
-        completion_label = "Deleted" if session.delete_enabled else "Archived"
+        console.print(f"Videos: {len(batch_videos)} | Size: {format_bytes(sum(v.size_bytes for v in batch_videos))}")
         console.print(
             f"Session: {session.completed_count}/{len(session.all_selected_uuids)} "
-            f"videos {completion_label.lower()} ({session.progress_pct}%)\n"
+            f"videos {session.completion_label.lower()} ({session.progress_pct}%)\n"
         )
 
         # Phase 1: Export
@@ -575,10 +572,9 @@ def archive(
         )
         eta_remaining = avg_batch_time * remaining_batches
 
-        completion_label = "Deleted" if session.delete_enabled else "Archived"
         console.print(
             f"[dim]Session progress: {session.completed_count}/{len(session.all_selected_uuids)} "
-            f"videos {completion_label.lower()} ({session.progress_pct}%)[/dim]"
+            f"videos {session.completion_label.lower()} ({session.progress_pct}%)[/dim]"
         )
         console.print(f"[dim]Elapsed: {elapsed_total/60:.1f}m | Avg batch: {avg_batch_time:.1f}s | Remaining: ~{eta_remaining/60:.1f}m[/dim]")
 
@@ -776,10 +772,9 @@ def resume() -> None:
     console.print(f"[bold cyan]Found interrupted session {session.session_id}[/bold cyan]")
     console.print(f"  Created: {session.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
     console.print(f"  Selected: {len(session.all_selected_uuids)} videos total")
-    completion_label = "Deleted" if session.delete_enabled else "Archived"
     console.print(
         f"  Progress: {session.completed_count}/{len(session.all_selected_uuids)} "
-        f"videos {completion_label.lower()} ({session.progress_pct}%)"
+        f"videos {session.completion_label.lower()} ({session.progress_pct}%)"
     )
     console.print(f"  Batches completed: {session.batches_completed}/{len(session.batches)}")
     console.print(f"  Remaining: {len(session.remaining_uuids)} videos\n")
@@ -789,10 +784,9 @@ def resume() -> None:
         console.print("[bold]Batch Summary:[/bold]")
         for batch in session.batches:
             status = "✓ Complete" if batch.is_complete else "⏳ In Progress"
-            completion_label = "Deleted" if session.delete_enabled else "Archived"
             completed = len(batch.deleted_uuids) if session.delete_enabled else len(batch.archived_uuids)
             console.print(
-                f"  Batch {batch.batch_number}: {completed}/{len(batch.selected_uuids)} {completion_label.lower()} {status}"
+                f"  Batch {batch.batch_number}: {completed}/{len(batch.selected_uuids)} {session.completion_label.lower()} {status}"
             )
 
     if not Confirm.ask("\nResume this session?"):
@@ -829,12 +823,11 @@ def status() -> None:
         console.print(f"[bold]Session {session.session_id} Status[/bold]")
         console.print(f"Created: {session.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-        completion_label = "Deleted" if session.delete_enabled else "Archived"
         console.print("[bold]Progress:[/bold]")
         console.print(f"  Selected:  {len(session.all_selected_uuids)} videos")
         console.print(f"  Exported:  {session.total_exported}/{len(session.all_selected_uuids)}")
         console.print(f"  Archived:  {session.total_archived}/{session.total_exported}")
-        console.print(f"  {completion_label}:   {session.completed_count}/{len(session.all_selected_uuids)}")
+        console.print(f"  {session.completion_label}:   {session.completed_count}/{len(session.all_selected_uuids)}")
 
         if session.failed_export_uuids or session.failed_delete_uuids:
             console.print(
@@ -848,10 +841,9 @@ def status() -> None:
             console.print("\n[bold]Batches:[/bold]")
             for batch in session.batches:
                 status = "✓ Complete" if batch.is_complete else "⏳ In Progress"
-                completion_label = "Deleted" if session.delete_enabled else "Archived"
                 completed = len(batch.deleted_uuids) if session.delete_enabled else len(batch.archived_uuids)
                 console.print(
-                    f"  Batch {batch.batch_number}: {completed}/{len(batch.selected_uuids)} {completion_label.lower()} {status}"
+                    f"  Batch {batch.batch_number}: {completed}/{len(batch.selected_uuids)} {session.completion_label.lower()} {status}"
                 )
 
         if Confirm.ask("\nClear this session?"):

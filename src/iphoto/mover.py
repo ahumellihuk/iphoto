@@ -14,6 +14,7 @@ from rich.progress import (
 )
 
 from .exporter import compute_sha256
+from .models import format_bytes
 
 console = Console()
 
@@ -79,8 +80,8 @@ def move_to_archive(
 
     if total_size > available:
         console.print(f"[red]Error: Not enough space on external drive[/red]")
-        console.print(f"  Required: {total_size / (1024**3):.2f} GB")
-        console.print(f"  Available: {available / (1024**3):.2f} GB")
+        console.print(f"  Required: {format_bytes(total_size)}")
+        console.print(f"  Available: {format_bytes(available)}")
         return {}
 
     external_path.mkdir(parents=True, exist_ok=True)
