@@ -309,6 +309,78 @@ def interactive_select(
     return selected
 
 
+def _display_selection_summary(
+    moments: list[MomentGroup],
+    selected_moments: set[str],
+    free_space_gb: Optional[float],
+) -> None:
+    """Display current selection stats and disk space info."""
+    stats = calculate_selection_stats(moments, selected_moments)
+
+    if selected_moments:
+        console.print(f"\n[bold][green]Current Selection[/green][/bold]")
+        console.print(f"  Moments: {stats['moments_selected']} selected")
+        console.print(
+            f"  Videos: [green]{stats['videos_archived']}[/green] to archive, "
+            f"[yellow]{stats['videos_skipped']}[/yellow] will stay in Photos"
+        )
+        console.print(
+            f"  Space: [bold green]{stats['archived_size_gb']:.2f} GB[/bold green] to reclaim, "
+            f"[dim]{stats['skipped_size_gb']:.2f} GB[/dim] skipped"
+        )
+
+    if free_space_gb is not None:
+        status = "+" if stats.get('archived_size_gb', 0) <= free_space_gb else "!"
+        console.print(f"\n[cyan]{status} External drive free space: {free_space_gb:.2f} GB[/cyan]")
+        if stats.get('archived_size_gb', 0) > free_space_gb:
+            console.print(
+                f"  [yellow]Selection ({stats['archived_size_gb']:.2f} GB) exceeds free space![/yellow]"
+            )
+
+
+def _display_moment_commands(threshold_mb: Optional[float]) -> None:
+    """Display available commands for moment selection."""
+    console.print("\n[bold]Commands:[/bold]")
+    console.print("  [cyan]n[/cyan]/[cyan]p[/cyan] - next/previous page")
+    console.print("  [cyan]1,2,3[/cyan] or [cyan]1-10[/cyan] - select moment(s)")
+    console.print("  [cyan]expand N[/cyan] - show videos in moment N")
+    if threshold_mb is not None:
+        console.print(f"  [cyan]reset[/cyan] - reset to smart thresholds (override: {threshold_mb:.0f}MB)")
+    else:
+        console.print("  [cyan]threshold N[/cyan] - apply N MB threshold to all moments")
+    console.print("  [cyan]preview[/cyan] - preview selected videos after filtering")
+    console.print("  [cyan]sort size|count|date[/cyan] - reorder list")
+    console.print("  [cyan]clear[/cyan] - clear selection, [cyan]done[/cyan] - proceed, [cyan]q[/cyan] - quit")
+
+
+def _confirm_moment_selection(
+    moments: list[MomentGroup],
+    selected_moments: set[str],
+    threshold_mb: Optional[float],
+) -> list[VideoInfo]:
+    """Show final selection and get user confirmation. Returns filtered videos or empty list."""
+    selected_moment_objs = [m for m in moments if m.key in selected_moments]
+    final_videos = []
+    for moment in selected_moment_objs:
+        final_videos.extend(moment.videos_above_threshold())
+
+    console.clear()
+    console.print(f"\n[bold]Selected {len(selected_moments)} moments:[/bold]")
+    for moment in selected_moment_objs:
+        above = len(moment.videos_above_threshold())
+        below = len(moment.videos_below_threshold())
+        threshold_desc = f"below {threshold_mb:.0f}MB" if threshold_mb is not None else "below smart threshold"
+        console.print(f"  - {moment.name}: {above} videos (skipping {below} {threshold_desc})")
+
+    console.print(f"\n[bold]Total to archive: {len(final_videos)} videos[/bold]")
+    display_videos(final_videos, show_index=False)
+    console.print(f"\nTotal size: [green]{format_total_size(final_videos)}[/green]")
+
+    if not Confirm.ask("\nProceed with archiving these videos?"):
+        return []
+    return final_videos
+
+
 def interactive_select_moments(
     moments: list[MomentGroup],
     external_path: Optional[Path] = None,
@@ -347,47 +419,8 @@ def interactive_select_moments(
         console.clear()
         display_moments(moments, page, selected_moments)
 
-        # Show current selection summary with space reclamation
-        stats = calculate_selection_stats(moments, selected_moments)
-
-        if selected_moments:
-            console.print(
-                f"\n[bold][green]📊 Current Selection[/green][/bold]"
-            )
-            console.print(
-                f"  Moments: {stats['moments_selected']} selected"
-            )
-            console.print(
-                f"  Videos: [green]{stats['videos_archived']}[/green] to archive, "
-                f"[yellow]{stats['videos_skipped']}[/yellow] will stay in Photos"
-            )
-            console.print(
-                f"  Space: [bold green]{stats['archived_size_gb']:.2f} GB[/bold green] to reclaim, "
-                f"[dim]{stats['skipped_size_gb']:.2f} GB[/dim] skipped"
-            )
-
-        # Show disk space information
-        if free_space_gb is not None:
-            status = "✓" if stats.get('archived_size_gb', 0) <= free_space_gb else "⚠"
-            console.print(
-                f"\n[cyan]{status} External drive free space: {free_space_gb:.2f} GB[/cyan]"
-            )
-            if stats.get('archived_size_gb', 0) > free_space_gb:
-                console.print(
-                    f"  [yellow]⚠ Selection ({stats['archived_size_gb']:.2f} GB) exceeds free space![/yellow]"
-                )
-
-        console.print("\n[bold]Commands:[/bold]")
-        console.print("  [cyan]n[/cyan]/[cyan]p[/cyan] - next/previous page")
-        console.print("  [cyan]1,2,3[/cyan] or [cyan]1-10[/cyan] - select moment(s)")
-        console.print("  [cyan]expand N[/cyan] - show videos in moment N")
-        if threshold_mb is not None:
-            console.print(f"  [cyan]reset[/cyan] - reset to smart thresholds (override: {threshold_mb:.0f}MB)")
-        else:
-            console.print("  [cyan]threshold N[/cyan] - apply N MB threshold to all moments")
-        console.print("  [cyan]preview[/cyan] - preview selected videos after filtering")
-        console.print("  [cyan]sort size|count|date[/cyan] - reorder list")
-        console.print("  [cyan]clear[/cyan] - clear selection, [cyan]done[/cyan] - proceed, [cyan]q[/cyan] - quit")
+        _display_selection_summary(moments, selected_moments, free_space_gb)
+        _display_moment_commands(threshold_mb)
 
         choice = Prompt.ask("\nEnter command").strip().lower()
 
@@ -489,29 +522,4 @@ def interactive_select_moments(
                 Prompt.ask("Press Enter to continue")
 
 
-    # Final confirmation - collect all videos above threshold from selected moments
-    selected_moment_objs = [m for m in moments if m.key in selected_moments]
-    final_videos = []
-    for moment in selected_moment_objs:
-        final_videos.extend(moment.videos_above_threshold())
-
-    console.clear()
-    console.print(f"\n[bold]Selected {len(selected_moments)} moments:[/bold]")
-    for moment in selected_moment_objs:
-        above = len(moment.videos_above_threshold())
-        below = len(moment.videos_below_threshold())
-        # Safe formatting for threshold
-        if threshold_mb is not None:
-            threshold_desc = f"below {threshold_mb:.0f}MB"
-        else:
-            threshold_desc = f"below smart threshold"
-        console.print(f"  • {moment.name}: {above} videos (skipping {below} {threshold_desc})")
-
-    console.print(f"\n[bold]Total to archive: {len(final_videos)} videos[/bold]")
-    display_videos(final_videos, show_index=False)
-    console.print(f"\nTotal size: [green]{format_total_size(final_videos)}[/green]")
-
-    if not Confirm.ask("\nProceed with archiving these videos?"):
-        return []
-
-    return final_videos
+    return _confirm_moment_selection(moments, selected_moments, threshold_mb)
