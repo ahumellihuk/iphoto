@@ -179,47 +179,11 @@ class MomentGroup:
         for size in sorted(sizes_mb, reverse=True):
             cumsum += size
             if cumsum >= target_size:
-                # Round to nearest 25MB
+                # Round to nearest 25MB boundary for clean thresholds
                 threshold = int((size / 25) + 0.5) * 25
                 return max(50.0, float(threshold))
 
         return 100.0
-
-
-@dataclass
-class BatchState:
-    """Tracks the state of an archive batch for resumption."""
-
-    batch_id: str
-    staging_path: Path
-    external_path: Path
-    selected_uuids: list[str] = field(default_factory=list)
-    exported_uuids: list[str] = field(default_factory=list)
-    archived_uuids: list[str] = field(default_factory=list)
-    deleted_uuids: list[str] = field(default_factory=list)
-    checksums: dict[str, str] = field(default_factory=dict)  # uuid -> sha256
-    created_at: datetime = field(default_factory=datetime.now)
-    failed_exports: dict[str, str] = field(default_factory=dict)  # uuid -> reason
-    failed_deletes: dict[str, str] = field(default_factory=dict)  # uuid -> reason
-    selected_moments: list[str] = field(default_factory=list)  # Moment names selected
-    threshold_mb: float = 100.0  # Threshold used for this batch
-
-    @property
-    def pending_export(self) -> list[str]:
-        return [u for u in self.selected_uuids if u not in self.exported_uuids]
-
-    @property
-    def pending_archive(self) -> list[str]:
-        return [u for u in self.exported_uuids if u not in self.archived_uuids]
-
-    @property
-    def pending_delete(self) -> list[str]:
-        return [u for u in self.archived_uuids if u not in self.deleted_uuids]
-
-    @property
-    def has_failures(self) -> bool:
-        """Whether any operations failed."""
-        return len(self.failed_exports) + len(self.failed_deletes) > 0
 
 
 @dataclass
@@ -236,12 +200,6 @@ class BatchProgress:
     checksums: dict[str, str] = field(default_factory=dict)
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: Optional[datetime] = None
-
-    @property
-    def total_size_bytes(self) -> int:
-        """Calculate total size from checksums (requires videos list)."""
-        # This is computed externally with full video info
-        return 0
 
     @property
     def is_complete(self) -> bool:
