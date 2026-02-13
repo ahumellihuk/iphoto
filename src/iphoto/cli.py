@@ -424,9 +424,6 @@ def archive(
     delete_timeout: int = typer.Option(
         120, "--delete-timeout", help="Timeout per video deletion in seconds (default: 2min)"
     ),
-    max_workers: int = typer.Option(
-        1, "--workers", "-w", help="Number of parallel export workers (default: 1)"
-    ),
     batch_size: Optional[int] = typer.Option(
         None, "--batch-size", help="Override automatic batch sizing (optional)"
     ),
@@ -465,13 +462,6 @@ def archive(
             save_session(session)
             return
 
-    # Enforce serial AppleScript export for stability across session
-    if max_workers != 1:
-        console.print("[yellow]Forcing --workers=1 for AppleScript stability.[/yellow]")
-        max_workers = 1
-        session.max_workers = 1
-        save_session(session)
-
     # Build video lookup for session
     all_videos_map = {v.uuid: v for v in all_videos}
 
@@ -497,7 +487,6 @@ def archive(
         calculated_batch_size = calculate_batch_size(
             staging_path=staging,
             remaining_videos=remaining_videos,
-            max_workers=max_workers,
             override_size=batch_size,
         )
 
@@ -658,7 +647,6 @@ def retry_failed(
                 Path(session.staging_path),
                 library_path=session.library_path,
                 timeout_seconds=session.export_timeout,
-                max_workers=session.max_workers,
                 allow_ambiguous=session.allow_ambiguous,
             )
             if exported:
@@ -828,7 +816,6 @@ def resume() -> None:
         no_delete=not session.delete_enabled,
         allow_ambiguous=session.allow_ambiguous,
         library=session.library_path,
-        max_workers=session.max_workers,
         continuous=True,
     )
 
