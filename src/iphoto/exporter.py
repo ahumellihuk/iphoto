@@ -105,7 +105,6 @@ class ParallelExporter:
         library_path: Optional[str] = None,
         timeout_seconds: int = 1800,
         icloud_timeout_seconds: Optional[int] = None,
-        settle_delay_seconds: float = 0.5,
     ) -> tuple[str, Optional[tuple[Path, str]], Optional[str]]:
         """Single video export task using AppleScript.
 
@@ -152,8 +151,6 @@ class ParallelExporter:
 
             # Compute checksum of exported file
             checksum = compute_sha256(exported_path)
-            if settle_delay_seconds > 0:
-                time.sleep(settle_delay_seconds)
             return video.uuid, (exported_path, checksum), None
 
         except Exception as e:
@@ -207,7 +204,7 @@ class ParallelExporter:
                 console=console,
             ) as progress:
                 task = progress.add_task(
-                    f"Exporting batch ({self.max_workers} parallel)...",
+                    f"Exporting...",
                     total=len(videos),
                 )
 
@@ -237,13 +234,13 @@ class ParallelExporter:
                             elapsed_sec = time.time() - batch_start
                             progress.update(
                                 task,
-                                description=f"Exporting ({self.max_workers} parallel) — "
+                                description=f"Exporting — "
                                            f"{completed_count}/{len(videos)} — ETA: {eta_str}"
                             )
                         else:
                             progress.update(
                                 task,
-                                description=f"Exporting ({self.max_workers} parallel) — "
+                                description=f"Exporting — "
                                            f"{completed_count}/{len(videos)} — Done"
                             )
                         progress.advance(task)
@@ -323,7 +320,6 @@ def export_videos(
     staging_path: Path,
     library_path: Optional[str] = None,
     timeout_seconds: int = 1800,  # 30 minutes - iCloud downloads can be slow
-    max_workers: int = 1,  # Default to sequential for AppleScript reliability
     allow_ambiguous: bool = False,
 ) -> tuple[dict[str, tuple[Path, str]], dict[str, str]]:
     """
@@ -341,7 +337,6 @@ def export_videos(
         staging_path: Path to staging directory
         library_path: Optional path to Photos library (not used with AppleScript)
         timeout_seconds: Timeout per video export in seconds
-        max_workers: Number of parallel export workers (default: 1 for AppleScript reliability)
 
     Returns tuple of (successful_exports, failed_exports)
     - successful_exports: dict of uuid -> (exported_path, sha256_hash)
@@ -373,13 +368,8 @@ def export_videos(
         console.print("[dim]  • Verify Photos.app is running and not paused for sync[/dim]")
         console.print("[dim]  • Check that videos are accessible in Photos.app[/dim]\n")
 
-    # Enforce serial AppleScript export for stability
-    if max_workers != 1:
-        console.print("[yellow]Forcing --workers=1 for AppleScript stability.[/yellow]")
-        max_workers = 1
-
-    # Use ParallelExporter for sequential export
-    exporter = ParallelExporter(max_workers=max_workers, staging_path=staging_path)
+    # Use ParallelExporter for sequential export (AppleScript is inherently sequential)
+    exporter = ParallelExporter(max_workers=1, staging_path=staging_path)
     icloud_timeout_seconds = max(timeout_seconds, 3600)
     results, failures = exporter.export_batch(
         videos=videos,
