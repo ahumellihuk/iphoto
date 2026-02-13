@@ -35,6 +35,15 @@ def get_free_disk_space(path: Path) -> Optional[float]:
         return None
 
 
+def format_threshold(threshold_mb: Optional[float], smart_threshold_mb: Optional[float] = None) -> str:
+    """Format threshold value for display."""
+    if threshold_mb is not None:
+        return f"{threshold_mb:.0f} MB"
+    if smart_threshold_mb is not None:
+        return f"{smart_threshold_mb:.0f} MB"
+    return "-"
+
+
 
 
 def calculate_selection_stats(moments: list[MomentGroup], selected_moment_keys: set[str]) -> dict:
@@ -129,13 +138,7 @@ def display_moments(
         idx = str(start + i + 1)
         selected_mark = "✓" if moment.key in selected_moments else ""
 
-        # Safe formatting for threshold
-        if moment.smart_threshold_mb is not None:
-            threshold_display = f"{moment.smart_threshold_mb:.0f} MB"
-        elif moment.threshold_mb is not None:
-            threshold_display = f"{moment.threshold_mb:.0f} MB"
-        else:
-            threshold_display = "-"
+        threshold_display = format_threshold(moment.smart_threshold_mb, moment.threshold_mb)
 
         table.add_row(
             idx,
@@ -156,13 +159,7 @@ def display_moment_detail(moment: MomentGroup) -> None:
     console.print(f"  Total: {moment.video_count} videos, {moment.total_size_formatted}")
     console.print(f"  Date Range: {moment.date_range}")
 
-    # Safe formatting for threshold
-    if moment.threshold_mb is not None:
-        threshold_display = f"{moment.threshold_mb:.0f}MB"
-    elif moment.smart_threshold_mb is not None:
-        threshold_display = f"{moment.smart_threshold_mb:.0f}MB"
-    else:
-        threshold_display = "Unknown"
+    threshold_display = format_threshold(moment.threshold_mb, moment.smart_threshold_mb)
     console.print(f"  Threshold: {threshold_display}")
 
     above = moment.videos_above_threshold()
