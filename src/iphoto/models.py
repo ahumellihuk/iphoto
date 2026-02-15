@@ -146,7 +146,7 @@ class MomentGroup:
         total_size = sum(sizes_mb)
         target_size = total_size * 0.90
 
-        cumsum = 0
+        cumsum = 0.0
         for size in sorted(sizes_mb, reverse=True):
             cumsum += size
             if cumsum >= target_size:
