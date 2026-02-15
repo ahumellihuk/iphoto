@@ -1,0 +1,83 @@
+[project]
+name = "iphoto"
+version = "0.2.0a1"
+description = "Archive old/large videos from Apple Photos to external storage"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.12"
+authors = [{ name = "Cam O'Connell" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: MacOS X",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Archiving",
+    "Topic :: Multimedia :: Video",
+]
+dependencies = [
+    "osxphotos>=0.68.0",
+    "photoscript>=0.3.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+iphoto = "iphoto.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/camoiloc/iphoto"
+Repository = "https://github.com/camoiloc/iphoto"
+Issues = "https://github.com/camoiloc/iphoto/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iphoto"]
+
+[tool.uv]
+python-preference = "managed"
+
+# osxphotos pins pyobjc==9.2 which fails to build (missing pkg_resources).
+# Override to a modern version that builds cleanly.
+override-dependencies = [
+    "pyobjc-core>=11",
+    "pyobjc-framework-cocoa>=11",
+    "pyobjc-framework-coremedia>=11",
+    "pyobjc-framework-coreaudio>=11",
+    "pyobjc-framework-avfoundation>=11",
+    "pyobjc-framework-quartz>=11",
+    "pyobjc-framework-coreservices>=11",
+    "pyobjc-framework-metal>=11",
+    "pyobjc-framework-photos>=11",
+    "pyobjc-framework-vision>=11",
+    "pyobjc-framework-applescriptkit>=11",
+    "pyobjc-framework-applescriptobjc>=11",
+]
+
+[dependency-groups]
+dev = ["ruff", "pytest", "pre-commit", "mypy"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/iphoto/cli.py" = ["B008"]  # typer.Option() in function defaults is idiomatic
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
