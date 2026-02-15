@@ -17,6 +17,7 @@ Apple Photos + iCloud storage management is awkward when:
 
 - Scan Apple Photos video metadata.
 - Group videos by moment and interactively choose what to archive.
+- Pick archive destination interactively with live free-space visibility.
 - Export originals through Photos.app automation.
 - Move exports to external storage with checksum validation.
 - Keep a JSONL manifest for search/audit.
@@ -49,8 +50,11 @@ iphoto version
 # Inspect library
 iphoto scan
 
-# Start interactive archival
+# Start interactive archival (includes destination picker with free-space info)
 iphoto archive
+
+# Skip destination picker in scripted runs
+iphoto archive --no-choose-external
 
 # Resume an interrupted run
 iphoto resume

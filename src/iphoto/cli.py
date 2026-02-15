@@ -18,6 +18,7 @@ from .models import BatchProgress, SessionState, VideoInfo, format_bytes
 from .mover import DEFAULT_EXTERNAL_PATH, check_external_mounted, cleanup_staging, move_to_archive
 from .scanner import group_by_moment, rank_videos, scan_videos
 from .selector import (
+    choose_archive_destination,
     display_moments,
     display_summary,
     display_videos,
@@ -106,6 +107,7 @@ def scan(
 def _resume_or_create_session(
     staging: Path,
     external: Path,
+    choose_external: bool,
     min_age_days: int | None,
     min_size_mb: float | None,
     threshold_mb: float | None,
@@ -145,6 +147,10 @@ def _resume_or_create_session(
             return None
 
     # New session
+    if choose_external:
+        external = choose_archive_destination(external)
+        console.print(f"[cyan]Archive destination: {external}[/cyan]\n")
+
     console.print("[bold]Step 1:[/bold] Scanning Photos library...\n")
     all_videos = scan_videos(min_age_days=min_age_days, min_size_mb=min_size_mb, library_path=library)
     if not all_videos:
@@ -295,6 +301,11 @@ def _archive_batch_phase(
 def archive(
     staging: Path = typer.Option(DEFAULT_STAGING, "--staging", "-s", help="Local staging directory"),
     external: Path = typer.Option(DEFAULT_EXTERNAL_PATH, "--external", "-e", help="External archive directory"),
+    choose_external: bool = typer.Option(
+        True,
+        "--choose-external/--no-choose-external",
+        help="Prompt to choose archive destination and show free disk space",
+    ),
     min_age_days: int | None = typer.Option(None, "--min-age", "-a", help="Minimum age in days"),
     min_size_mb: float | None = typer.Option(None, "--min-size", "-m", help="Minimum size in MB"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without making changes"),
@@ -332,6 +343,7 @@ def archive(
     result = _resume_or_create_session(
         staging=staging,
         external=external,
+        choose_external=choose_external,
         min_age_days=min_age_days,
         min_size_mb=min_size_mb,
         threshold_mb=threshold_mb,

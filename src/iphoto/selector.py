@@ -1,5 +1,6 @@
 """Interactive video selection UI."""
 
+import os
 import shutil
 from pathlib import Path
 
@@ -24,10 +25,121 @@ def format_total_size(videos: list[VideoInfo]) -> str:
 def get_free_disk_space(path: Path) -> float | None:
     """Get free disk space in GB for the given path."""
     try:
-        stat = shutil.disk_usage(str(path))
+        check_path = path
+        while not check_path.exists() and check_path.parent != check_path:
+            check_path = check_path.parent
+        stat = shutil.disk_usage(str(check_path))
         return stat.free / (1024 * 1024 * 1024)
     except Exception:
         return None
+
+
+def get_total_disk_space(path: Path) -> float | None:
+    """Get total disk space in GB for the given path."""
+    try:
+        check_path = path
+        while not check_path.exists() and check_path.parent != check_path:
+            check_path = check_path.parent
+        stat = shutil.disk_usage(str(check_path))
+        return stat.total / (1024 * 1024 * 1024)
+    except Exception:
+        return None
+
+
+def suggest_archive_destinations(external_path: Path) -> list[Path]:
+    """Build a deduplicated list of likely archive destinations."""
+    candidates = [external_path]
+
+    volumes_root = Path("/Volumes")
+    if volumes_root.exists():
+        for volume in sorted(volumes_root.iterdir()):
+            if not volume.is_dir() or volume.name.startswith("."):
+                continue
+            candidates.append(volume / "Photos-archive")
+
+    # Include a local fallback so users can still proceed if no external drive is mounted.
+    candidates.append(Path.home() / "Photos-archive")
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = os.path.normcase(str(candidate.expanduser()))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(candidate)
+    return deduped
+
+
+def choose_archive_destination(external_path: Path) -> Path:
+    """Interactively choose archive destination and show available disk space."""
+    selected_path = external_path
+
+    while True:
+        candidates = suggest_archive_destinations(selected_path)
+        console.clear()
+        console.print("[bold]Archive Destination[/bold]")
+        console.print("[dim]Choose where archived videos will be copied.[/dim]\n")
+
+        table = Table(title="Candidate Destinations")
+        table.add_column("#", style="dim", width=4)
+        table.add_column("Path", style="cyan")
+        table.add_column("Free", style="green", width=10)
+        table.add_column("Total", style="dim", width=10)
+        table.add_column("Status", width=10)
+
+        for idx, path in enumerate(candidates, start=1):
+            free_gb = get_free_disk_space(path)
+            total_gb = get_total_disk_space(path)
+            volume_ok = True
+            if str(path).startswith("/Volumes/"):
+                volume_name = path.parts[2] if len(path.parts) > 2 else ""
+                volume_ok = bool(volume_name) and (Path("/Volumes") / volume_name).exists()
+
+            status = "mounted" if volume_ok else "missing"
+            free_text = f"{free_gb:.2f} GB" if free_gb is not None else "-"
+            total_text = f"{total_gb:.2f} GB" if total_gb is not None else "-"
+            table.add_row(str(idx), str(path), free_text, total_text, status)
+
+        console.print(table)
+        console.print("\n[bold]Commands:[/bold]")
+        console.print("  [cyan]number[/cyan] - choose a listed destination")
+        console.print("  [cyan]custom[/cyan] - type a custom destination path")
+        console.print("  [cyan]refresh[/cyan] - rescan mounted volumes")
+        console.print("  [cyan]q[/cyan] - keep current destination")
+        console.print(f"\nCurrent: [green]{selected_path}[/green]")
+
+        choice = Prompt.ask("\nEnter command").strip()
+        lowered = choice.lower()
+
+        if lowered in {"q", "quit"}:
+            return selected_path
+
+        if lowered == "refresh":
+            continue
+
+        if lowered == "custom":
+            typed = Prompt.ask("Custom destination path").strip()
+            if not typed:
+                continue
+            selected_path = Path(typed).expanduser()
+            if Confirm.ask(f"Use {selected_path} as archive destination?"):
+                return selected_path
+            continue
+
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(candidates):
+                selected_path = candidates[idx]
+                if Confirm.ask(f"Use {selected_path} as archive destination?"):
+                    return selected_path
+            else:
+                console.print("[red]Invalid destination number[/red]")
+                Prompt.ask("Press Enter to continue")
+            continue
+
+        console.print("[red]Invalid command[/red]")
+        Prompt.ask("Press Enter to continue")
 
 
 def format_threshold(threshold_mb: float | None, smart_threshold_mb: float | None = None) -> str:
