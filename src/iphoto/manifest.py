@@ -1,9 +1,9 @@
 """Manifest utilities for archived videos."""
 
 import json
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
 
 from .models import VideoInfo
 

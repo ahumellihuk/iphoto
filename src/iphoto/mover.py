@@ -79,7 +79,7 @@ def move_to_archive(
     available = get_available_space(external_path)
 
     if total_size > available:
-        console.print(f"[red]Error: Not enough space on external drive[/red]")
+        console.print("[red]Error: Not enough space on external drive[/red]")
         console.print(f"  Required: {format_bytes(total_size)}")
         console.print(f"  Available: {format_bytes(available)}")
         return {}
@@ -162,4 +162,4 @@ def cleanup_staging(staging_path: Path) -> None:
     # Remove staging folder if empty
     if not any(staging_path.iterdir()):
         staging_path.rmdir()
-        console.print(f"[dim]Cleaned up staging directory[/dim]")
+        console.print("[dim]Cleaned up staging directory[/dim]")

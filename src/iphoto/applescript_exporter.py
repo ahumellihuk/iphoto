@@ -7,7 +7,6 @@ videos share the same filename.
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
 
 
 def run_applescript(script: str, timeout: int) -> tuple[bool, str, str]:
@@ -28,22 +27,22 @@ def run_applescript(script: str, timeout: int) -> tuple[bool, str, str]:
 
 def activate_photos(timeout: int = 10) -> bool:
     """Bring Photos.app to foreground."""
-    script = '''
+    script = """
     tell application "Photos"
         activate
     end tell
-    '''
+    """
     success, _, _ = run_applescript(script, timeout=timeout)
     return success
 
 
 def restart_photos(timeout: int = 30) -> None:
     """Quit and relaunch Photos.app to recover from AppleScript timeouts."""
-    quit_script = '''
+    quit_script = """
     tell application "Photos"
         quit
     end tell
-    '''
+    """
     run_applescript(quit_script, timeout=timeout)
     time.sleep(2.0)
     activate_photos(timeout=timeout)
@@ -57,11 +56,11 @@ def is_timeout_error(message: str) -> bool:
 
 def check_photos_responsive(timeout: int = 15) -> bool:
     """Check if Photos.app is running and responsive to AppleScript."""
-    script = '''
+    script = """
     tell application "Photos"
         return "OK"
     end tell
-    '''
+    """
     success, stdout, _ = run_applescript(script, timeout=timeout)
     return success and stdout.strip() == "OK"
 
@@ -73,12 +72,11 @@ def _clean_stale_files(output_dir: Path, filename: str) -> None:
     for f in output_dir.iterdir():
         if not f.is_file():
             continue
-        if f.suffix.lower() == suffix and f.stem.startswith(stem):
-            if f.stat().st_size == 0:
-                f.unlink()
+        if f.suffix.lower() == suffix and f.stem.startswith(stem) and f.stat().st_size == 0:
+            f.unlink()
 
 
-def _find_exported_file(output_dir: Path, filename: str) -> Optional[Path]:
+def _find_exported_file(output_dir: Path, filename: str) -> Path | None:
     """Find an exported file, accounting for Photos.app renaming (e.g. 'IMG_1234 2.MOV')."""
     # Exact match first
     exact = output_dir / filename
@@ -99,7 +97,7 @@ def _poll_for_file(
     filename: str,
     timeout_seconds: int,
     poll_interval: float,
-) -> Optional[Path]:
+) -> Path | None:
     """Poll for an exported file to appear with non-zero size."""
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
@@ -123,7 +121,7 @@ def export_via_applescript(
     delay_between_retries: float = 1.0,
     post_export_wait_seconds: int = 30,
     post_export_poll_seconds: float = 1.0,
-) -> tuple[bool, Optional[Path], Optional[str]]:
+) -> tuple[bool, Path | None, str | None]:
     """Export a video from Photos.app using AppleScript with UUID lookup.
 
     Args:
@@ -176,9 +174,7 @@ end tell
 
     for attempt in range(max_retries):
         try:
-            success, stdout, stderr = run_applescript(
-                applescript, timeout=timeout + 30
-            )
+            success, stdout, stderr = run_applescript(applescript, timeout=timeout + 30)
             output = stdout.strip()
 
             if success:
@@ -191,10 +187,7 @@ end tell
                     return False, None, f"Video uuid={uuid} not found in Photos library"
                 elif output.startswith("ERROR:"):
                     parts = output.split(":", 2)
-                    if len(parts) >= 3:
-                        last_error = f"AppleScript error {parts[1]}: {parts[2]}"
-                    else:
-                        last_error = output
+                    last_error = f"AppleScript error {parts[1]}: {parts[2]}" if len(parts) >= 3 else output
                 else:
                     last_error = f"Unexpected AppleScript output: {output}"
             else:
@@ -203,7 +196,7 @@ end tell
         except subprocess.TimeoutExpired:
             last_error = f"Export timed out after {timeout} seconds"
         except Exception as e:
-            last_error = f"Unexpected error: {str(e)}"
+            last_error = f"Unexpected error: {e!s}"
 
         # Retry logic
         if attempt < max_retries - 1:
@@ -213,7 +206,7 @@ end tell
                 restart_photos()
                 time.sleep(3.0)
 
-            delay = delay_between_retries * (2 ** attempt)
+            delay = delay_between_retries * (2**attempt)
             time.sleep(delay)
 
     return False, None, f"Export failed after {max_retries} attempts: {last_error}"

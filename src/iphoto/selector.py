@@ -2,14 +2,13 @@
 
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from .models import VideoInfo, MomentGroup, format_bytes
-from .scanner import rank_videos, rank_moments
+from .models import MomentGroup, VideoInfo, format_bytes
+from .scanner import rank_moments, rank_videos
 
 console = Console()
 
@@ -22,7 +21,7 @@ def format_total_size(videos: list[VideoInfo]) -> str:
     return format_bytes(sum(v.size_bytes for v in videos))
 
 
-def get_free_disk_space(path: Path) -> Optional[float]:
+def get_free_disk_space(path: Path) -> float | None:
     """Get free disk space in GB for the given path."""
     try:
         stat = shutil.disk_usage(str(path))
@@ -31,15 +30,13 @@ def get_free_disk_space(path: Path) -> Optional[float]:
         return None
 
 
-def format_threshold(threshold_mb: Optional[float], smart_threshold_mb: Optional[float] = None) -> str:
+def format_threshold(threshold_mb: float | None, smart_threshold_mb: float | None = None) -> str:
     """Format threshold value for display."""
     if threshold_mb is not None:
         return f"{threshold_mb:.0f} MB"
     if smart_threshold_mb is not None:
         return f"{smart_threshold_mb:.0f} MB"
     return "-"
-
-
 
 
 def calculate_selection_stats(moments: list[MomentGroup], selected_moment_keys: set[str]) -> dict:
@@ -58,12 +55,12 @@ def calculate_selection_stats(moments: list[MomentGroup], selected_moment_keys: 
     total_size_bytes = archived_size_bytes + skipped_size_bytes
 
     return {
-        'moments_selected': len(selected_moment_objs),
-        'videos_archived': len(archived_videos),
-        'videos_skipped': len(skipped_videos),
-        'archived_size_gb': archived_size_bytes / (1024 ** 3),
-        'skipped_size_gb': skipped_size_bytes / (1024 ** 3),
-        'total_size_gb': total_size_bytes / (1024 ** 3),
+        "moments_selected": len(selected_moment_objs),
+        "videos_archived": len(archived_videos),
+        "videos_skipped": len(skipped_videos),
+        "archived_size_gb": archived_size_bytes / (1024**3),
+        "skipped_size_gb": skipped_size_bytes / (1024**3),
+        "total_size_gb": total_size_bytes / (1024**3),
     }
 
 
@@ -104,7 +101,7 @@ def display_videos(
 def display_moments(
     moments: list[MomentGroup],
     page: int = 0,
-    selected_moments: set[str] = None,
+    selected_moments: set[str] | None = None,
 ) -> None:
     """Display a page of moments in a table."""
     selected_moments = selected_moments or set()
@@ -114,8 +111,6 @@ def display_moments(
 
     # Calculate totals across all moments
     total_videos = sum(m.video_count for m in moments)
-    total_size = sum(m.total_size_bytes for m in moments)
-    total_reclaim = sum(m.space_to_reclaim for m in moments)
 
     table = Table(
         title=f"Moments {start + 1}-{end} of {len(moments)} "
@@ -169,7 +164,6 @@ def display_moment_detail(moment: MomentGroup) -> None:
 
     if below:
         console.print(f"\n[yellow]Videos below threshold ({len(below)}) - will be skipped:[/yellow]")
-        below_size = sum(v.size_bytes for v in below)
         console.print(f"  [dim]Skipping {len(below)} videos totaling {format_total_size(below)}[/dim]")
 
 
@@ -179,12 +173,11 @@ def display_summary(videos: list[VideoInfo]) -> None:
         console.print("[yellow]No videos found matching criteria.[/yellow]")
         return
 
-    total_size = sum(v.size_bytes for v in videos)
     oldest = min(videos, key=lambda v: v.date_created)
     largest = max(videos, key=lambda v: v.size_bytes)
     longest = max(videos, key=lambda v: v.duration_seconds)
 
-    console.print(f"\n[bold]Summary:[/bold]")
+    console.print("\n[bold]Summary:[/bold]")
     console.print(f"  Total videos: {len(videos)}")
     console.print(f"  Total size: {format_total_size(videos)}")
     console.print(f"  Longest: {longest.duration_formatted} ({longest.original_filename})")
@@ -194,7 +187,7 @@ def display_summary(videos: list[VideoInfo]) -> None:
 
 def interactive_select(
     videos: list[VideoInfo],
-    max_size_gb: Optional[float] = None,
+    max_size_gb: float | None = None,
 ) -> list[VideoInfo]:
     """Interactively select videos to archive."""
     if not videos:
@@ -290,7 +283,9 @@ def interactive_select(
         if max_size_gb:
             current_size_gb = sum(v.size_bytes for v in selected) / (1024**3)
             if current_size_gb > max_size_gb:
-                console.print(f"[yellow]Warning: Selection exceeds {max_size_gb} GB limit ({current_size_gb:.2f} GB)[/yellow]")
+                console.print(
+                    f"[yellow]Warning: Selection exceeds {max_size_gb} GB limit ({current_size_gb:.2f} GB)[/yellow]"
+                )
                 Prompt.ask("Press Enter to continue")
 
     # Final confirmation
@@ -308,13 +303,13 @@ def interactive_select(
 def _display_selection_summary(
     moments: list[MomentGroup],
     selected_moments: set[str],
-    free_space_gb: Optional[float],
+    free_space_gb: float | None,
 ) -> None:
     """Display current selection stats and disk space info."""
     stats = calculate_selection_stats(moments, selected_moments)
 
     if selected_moments:
-        console.print(f"\n[bold][green]Current Selection[/green][/bold]")
+        console.print("\n[bold][green]Current Selection[/green][/bold]")
         console.print(f"  Moments: {stats['moments_selected']} selected")
         console.print(
             f"  Videos: [green]{stats['videos_archived']}[/green] to archive, "
@@ -326,15 +321,13 @@ def _display_selection_summary(
         )
 
     if free_space_gb is not None:
-        status = "+" if stats.get('archived_size_gb', 0) <= free_space_gb else "!"
+        status = "+" if stats.get("archived_size_gb", 0) <= free_space_gb else "!"
         console.print(f"\n[cyan]{status} External drive free space: {free_space_gb:.2f} GB[/cyan]")
-        if stats.get('archived_size_gb', 0) > free_space_gb:
-            console.print(
-                f"  [yellow]Selection ({stats['archived_size_gb']:.2f} GB) exceeds free space![/yellow]"
-            )
+        if stats.get("archived_size_gb", 0) > free_space_gb:
+            console.print(f"  [yellow]Selection ({stats['archived_size_gb']:.2f} GB) exceeds free space![/yellow]")
 
 
-def _display_moment_commands(threshold_mb: Optional[float]) -> None:
+def _display_moment_commands(threshold_mb: float | None) -> None:
     """Display available commands for moment selection."""
     console.print("\n[bold]Commands:[/bold]")
     console.print("  [cyan]n[/cyan]/[cyan]p[/cyan] - next/previous page")
@@ -352,7 +345,7 @@ def _display_moment_commands(threshold_mb: Optional[float]) -> None:
 def _confirm_moment_selection(
     moments: list[MomentGroup],
     selected_moments: set[str],
-    threshold_mb: Optional[float],
+    threshold_mb: float | None,
 ) -> list[VideoInfo]:
     """Show final selection and get user confirmation. Returns filtered videos or empty list."""
     selected_moment_objs = [m for m in moments if m.key in selected_moments]
@@ -379,8 +372,8 @@ def _confirm_moment_selection(
 
 def interactive_select_moments(
     moments: list[MomentGroup],
-    external_path: Optional[Path] = None,
-    threshold_mb: Optional[float] = None,
+    external_path: Path | None = None,
+    threshold_mb: float | None = None,
 ) -> list[VideoInfo]:
     """Interactively select moments, returning filtered videos above threshold.
 
@@ -460,7 +453,9 @@ def interactive_select_moments(
                 threshold_mb = new_threshold
                 for moment in moments:
                     moment.threshold_mb = new_threshold
-                console.print(f"[green]Global threshold set to {new_threshold:.0f}MB (overrides smart thresholds)[/green]")
+                console.print(
+                    f"[green]Global threshold set to {new_threshold:.0f}MB (overrides smart thresholds)[/green]"
+                )
                 Prompt.ask("Press Enter to continue")
             except ValueError:
                 console.print("[red]Invalid threshold value[/red]")
@@ -516,6 +511,5 @@ def interactive_select_moments(
             except ValueError:
                 console.print("[red]Invalid selection[/red]")
                 Prompt.ask("Press Enter to continue")
-
 
     return _confirm_moment_selection(moments, selected_moments, threshold_mb)

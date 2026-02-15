@@ -5,7 +5,6 @@ import shutil
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -13,12 +12,19 @@ from rich.prompt import Confirm
 
 from . import __version__
 from .deleter import delete_from_photos
-from .exporter import export_videos, calculate_batch_size, compute_sha256
+from .exporter import calculate_batch_size, compute_sha256, export_videos
 from .manifest import append_manifest_entries, build_manifest_entry, load_manifest
-from .models import VideoInfo, MomentGroup, SessionState, BatchProgress, format_bytes
+from .models import BatchProgress, SessionState, VideoInfo, format_bytes
 from .mover import DEFAULT_EXTERNAL_PATH, check_external_mounted, cleanup_staging, move_to_archive
-from .scanner import rank_videos, scan_videos, group_by_moment
-from .selector import display_summary, display_videos, format_total_size, interactive_select, interactive_select_moments, display_moments
+from .scanner import group_by_moment, rank_videos, scan_videos
+from .selector import (
+    display_moments,
+    display_summary,
+    display_videos,
+    format_total_size,
+    interactive_select,
+    interactive_select_moments,
+)
 
 app = typer.Typer(
     name="iphoto",
@@ -39,7 +45,7 @@ def save_session(session: SessionState) -> None:
         console.print(f"[yellow]Warning: Could not save session: {e}[/yellow]")
 
 
-def load_session() -> Optional[SessionState]:
+def load_session() -> SessionState | None:
     """Load multi-batch session state for resumption."""
     if not SESSION_FILE.exists():
         return None
@@ -58,24 +64,12 @@ def clear_session() -> None:
 
 @app.command()
 def scan(
-    min_age_days: Optional[int] = typer.Option(
-        None, "--min-age", "-a", help="Minimum age in days"
-    ),
-    min_size_mb: Optional[float] = typer.Option(
-        None, "--min-size", "-s", help="Minimum size in MB"
-    ),
-    sort_by: str = typer.Option(
-        "size", "--sort", help="Sort by: size, duration, age, date"
-    ),
-    limit: int = typer.Option(
-        50, "--limit", "-n", help="Number of videos to display"
-    ),
-    group_by: str = typer.Option(
-        "flat", "--group-by", help="Grouping: flat or moment"
-    ),
-    library: Optional[str] = typer.Option(
-        None, "--library", "-l", help="Path to Photos library"
-    ),
+    min_age_days: int | None = typer.Option(None, "--min-age", "-a", help="Minimum age in days"),
+    min_size_mb: float | None = typer.Option(None, "--min-size", "-s", help="Minimum size in MB"),
+    sort_by: str = typer.Option("size", "--sort", help="Sort by: size, duration, age, date"),
+    limit: int = typer.Option(50, "--limit", "-n", help="Number of videos to display"),
+    group_by: str = typer.Option("flat", "--group-by", help="Grouping: flat or moment"),
+    library: str | None = typer.Option(None, "--library", "-l", help="Path to Photos library"),
 ) -> None:
     """Scan Photos library and display archivable videos."""
     console.print("[bold]Scanning Photos library for videos...[/bold]\n")
@@ -106,23 +100,23 @@ def scan(
         console.print(f"\n[bold]Top {min(limit, len(videos))} videos:[/bold]")
         display_videos(videos[:limit])
 
-    console.print(f"\n[dim]Use 'iphoto archive' to start archiving.[/dim]")
+    console.print("\n[dim]Use 'iphoto archive' to start archiving.[/dim]")
 
 
 def _resume_or_create_session(
     staging: Path,
     external: Path,
-    min_age_days: Optional[int],
-    min_size_mb: Optional[float],
-    threshold_mb: Optional[float],
+    min_age_days: int | None,
+    min_size_mb: float | None,
+    threshold_mb: float | None,
     use_moments: bool,
-    batch_size: Optional[int],
+    batch_size: int | None,
     export_timeout: int,
     delete_timeout: int,
     no_delete: bool,
     allow_ambiguous: bool,
-    library: Optional[str],
-) -> Optional[tuple[SessionState, list[VideoInfo]]]:
+    library: str | None,
+) -> tuple[SessionState, list[VideoInfo]] | None:
     """Resume existing session or create new one via scan+select."""
     existing_session = load_session()
     if existing_session and not existing_session.is_complete:
@@ -177,14 +171,21 @@ def _resume_or_create_session(
         return None
 
     session = SessionState(
-        staging_path=staging, external_path=external,
+        staging_path=staging,
+        external_path=external,
         all_selected_uuids=[v.uuid for v in selected],
         remaining_uuids=[v.uuid for v in selected],
-        threshold_mb=threshold_mb, min_age_days=min_age_days, min_size_mb=min_size_mb,
-        use_moments=use_moments, batch_size=batch_size,
-        export_timeout=export_timeout, delete_timeout=delete_timeout,
-        delete_enabled=not no_delete, allow_ambiguous=allow_ambiguous,
-        library_path=library, videos=selected,
+        threshold_mb=threshold_mb,
+        min_age_days=min_age_days,
+        min_size_mb=min_size_mb,
+        use_moments=use_moments,
+        batch_size=batch_size,
+        export_timeout=export_timeout,
+        delete_timeout=delete_timeout,
+        delete_enabled=not no_delete,
+        allow_ambiguous=allow_ambiguous,
+        library_path=library,
+        videos=selected,
     )
     session.manifest_path = str(external / f"iphoto_manifest_{session.session_id}.json")
     save_session(session)
@@ -209,7 +210,8 @@ def _export_batch_phase(
         return {v.uuid: (staging / v.original_filename, "dry") for v in batch_videos}, {}
 
     exported, export_failures = export_videos(
-        batch_videos, staging,
+        batch_videos,
+        staging,
         library_path=session.library_path,
         timeout_seconds=session.export_timeout,
         allow_ambiguous=session.allow_ambiguous,
@@ -220,9 +222,7 @@ def _export_batch_phase(
     session.total_exported += len(exported)
     session.total_failed_exports += len(export_failures)
     if export_failures:
-        session.failed_export_uuids = sorted(
-            set(session.failed_export_uuids).union(export_failures.keys())
-        )
+        session.failed_export_uuids = sorted(set(session.failed_export_uuids).union(export_failures.keys()))
     save_session(session)
     return exported, export_failures
 
@@ -236,7 +236,7 @@ def _archive_batch_phase(
     dry_run: bool,
 ) -> dict[str, Path]:
     """Phase 2+3: Archive to external and optionally delete from Photos."""
-    console.print(f"\n[bold]Phase 2:[/bold] Archiving to external drive...")
+    console.print("\n[bold]Phase 2:[/bold] Archiving to external drive...")
     if dry_run:
         console.print(f"[cyan][DRY RUN] Would archive {len(exported)} videos[/cyan]")
         archived = dict(exported)
@@ -258,7 +258,9 @@ def _archive_batch_phase(
                 if not checksum and dest_path.exists():
                     checksum = compute_sha256(dest_path)
                 manifest_entries.append(
-                    build_manifest_entry(video=video, archived_path=dest_path, checksum=checksum or "", session_id=session.session_id)
+                    build_manifest_entry(
+                        video=video, archived_path=dest_path, checksum=checksum or "", session_id=session.session_id
+                    )
                 )
             if manifest_entries:
                 append_manifest_entries(Path(session.manifest_path), manifest_entries)
@@ -268,7 +270,7 @@ def _archive_batch_phase(
 
     # Phase 3: Delete
     if session.delete_enabled:
-        console.print(f"\n[bold]Phase 3:[/bold] Deleting from Photos...")
+        console.print("\n[bold]Phase 3:[/bold] Deleting from Photos...")
         archived_videos = [v for v in batch_videos if v.uuid in archived]
         deleted, delete_failures = delete_from_photos(
             archived_videos,
@@ -282,9 +284,7 @@ def _archive_batch_phase(
             session.total_deleted += len(deleted)
             session.total_failed_deletes += len(delete_failures)
             if delete_failures:
-                session.failed_delete_uuids = sorted(
-                    set(session.failed_delete_uuids).union(delete_failures.keys())
-                )
+                session.failed_delete_uuids = sorted(set(session.failed_delete_uuids).union(delete_failures.keys()))
 
     batch.completed_at = datetime.now()
     save_session(session)
@@ -293,45 +293,29 @@ def _archive_batch_phase(
 
 @app.command()
 def archive(
-    staging: Path = typer.Option(
-        DEFAULT_STAGING, "--staging", "-s", help="Local staging directory"
-    ),
-    external: Path = typer.Option(
-        DEFAULT_EXTERNAL_PATH, "--external", "-e", help="External archive directory"
-    ),
-    min_age_days: Optional[int] = typer.Option(
-        None, "--min-age", "-a", help="Minimum age in days"
-    ),
-    min_size_mb: Optional[float] = typer.Option(
-        None, "--min-size", "-m", help="Minimum size in MB"
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", "-n", help="Preview without making changes"
-    ),
-    no_delete: bool = typer.Option(
-        False, "--no-delete", help="Archive but don't delete from Photos"
-    ),
+    staging: Path = typer.Option(DEFAULT_STAGING, "--staging", "-s", help="Local staging directory"),
+    external: Path = typer.Option(DEFAULT_EXTERNAL_PATH, "--external", "-e", help="External archive directory"),
+    min_age_days: int | None = typer.Option(None, "--min-age", "-a", help="Minimum age in days"),
+    min_size_mb: float | None = typer.Option(None, "--min-size", "-m", help="Minimum size in MB"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without making changes"),
+    no_delete: bool = typer.Option(False, "--no-delete", help="Archive but don't delete from Photos"),
     allow_ambiguous: bool = typer.Option(
         False, "--allow-ambiguous", help="Allow duplicate filenames (may match wrong item)"
     ),
-    threshold_mb: Optional[float] = typer.Option(
+    threshold_mb: float | None = typer.Option(
         None, "--threshold", "-t", help="Size threshold in MB (None = auto-suggest based on distribution)"
     ),
     use_moments: bool = typer.Option(
         True, "--use-moments/--no-moments", help="Use moment-based grouping (default: True)"
     ),
-    library: Optional[str] = typer.Option(
-        None, "--library", "-l", help="Path to Photos library"
-    ),
+    library: str | None = typer.Option(None, "--library", "-l", help="Path to Photos library"),
     export_timeout: int = typer.Option(
         1800, "--export-timeout", help="Timeout per video export in seconds (default: 30min for iCloud downloads)"
     ),
     delete_timeout: int = typer.Option(
         120, "--delete-timeout", help="Timeout per video deletion in seconds (default: 2min)"
     ),
-    batch_size: Optional[int] = typer.Option(
-        None, "--batch-size", help="Override automatic batch sizing (optional)"
-    ),
+    batch_size: int | None = typer.Option(None, "--batch-size", help="Override automatic batch sizing (optional)"),
     continuous: bool = typer.Option(
         True, "--continuous/--interactive", help="Process all batches without prompting (default: True)"
     ),
@@ -346,10 +330,18 @@ def archive(
 
     # Resume or create session
     result = _resume_or_create_session(
-        staging=staging, external=external, min_age_days=min_age_days,
-        min_size_mb=min_size_mb, threshold_mb=threshold_mb, use_moments=use_moments,
-        batch_size=batch_size, export_timeout=export_timeout, delete_timeout=delete_timeout,
-        no_delete=no_delete, allow_ambiguous=allow_ambiguous, library=library,
+        staging=staging,
+        external=external,
+        min_age_days=min_age_days,
+        min_size_mb=min_size_mb,
+        threshold_mb=threshold_mb,
+        use_moments=use_moments,
+        batch_size=batch_size,
+        export_timeout=export_timeout,
+        delete_timeout=delete_timeout,
+        no_delete=no_delete,
+        allow_ambiguous=allow_ambiguous,
+        library=library,
     )
     if not result:
         return
@@ -363,12 +355,11 @@ def archive(
     staging.mkdir(parents=True, exist_ok=True)
 
     # Pre-flight check: verify external drive is mounted (skip in dry-run)
-    if not dry_run:
-        if not check_external_mounted(external):
-            console.print(f"[red]Error: External drive not mounted at {external}[/red]")
-            console.print("[yellow]Connect the external drive and try again.[/yellow]")
-            save_session(session)
-            return
+    if not dry_run and not check_external_mounted(external):
+        console.print(f"[red]Error: External drive not mounted at {external}[/red]")
+        console.print("[yellow]Connect the external drive and try again.[/yellow]")
+        save_session(session)
+        return
 
     # Build video lookup for session
     all_videos_map = {v.uuid: v for v in all_videos}
@@ -420,14 +411,18 @@ def archive(
 
             if not batch_videos:
                 first_video = all_videos_map[session.remaining_uuids[0]]
-                console.print(f"[red]CRITICAL: Largest remaining video ({format_bytes(first_video.size_bytes)}) "
-                             f"exceeds available space ({format_bytes(int(usable_bytes))})[/red]")
+                console.print(
+                    f"[red]CRITICAL: Largest remaining video ({format_bytes(first_video.size_bytes)}) "
+                    f"exceeds available space ({format_bytes(int(usable_bytes))})[/red]"
+                )
                 console.print("[red]Cannot proceed. Free up staging space and retry.[/red]")
                 return
 
             batch_uuids = [v.uuid for v in batch_videos]
-            console.print(f"[yellow]Batch size adjusted from {calculated_batch_size} to {len(batch_videos)} "
-                         f"to fit available staging space[/yellow]")
+            console.print(
+                f"[yellow]Batch size adjusted from {calculated_batch_size} to {len(batch_videos)} "
+                f"to fit available staging space[/yellow]"
+            )
 
         batch = session.add_batch(batch_num, batch_uuids)
         estimated_batches = len(session.all_selected_uuids) // calculated_batch_size + 1
@@ -472,20 +467,23 @@ def archive(
 
         # Calculate and show statistics
         console.print(f"\n[bold cyan]Batch {batch_num} Complete[/bold cyan]")
-        console.print(f"  Time: {batch_total_time:.1f}s (Export: {phase1_time:.1f}s, Archive+Delete: {phase23_time:.1f}s)")
+        console.print(
+            f"  Time: {batch_total_time:.1f}s (Export: {phase1_time:.1f}s, Archive+Delete: {phase23_time:.1f}s)"
+        )
 
         elapsed_total = time.time() - session_start_time
         avg_batch_time = sum(batch_times) / len(batch_times) if batch_times else 0
-        remaining_batches = max(
-            0, (len(session.all_selected_uuids) - session.completed_count) // calculated_batch_size
-        )
+        remaining_batches = max(0, (len(session.all_selected_uuids) - session.completed_count) // calculated_batch_size)
         eta_remaining = avg_batch_time * remaining_batches
 
         console.print(
             f"[dim]Session progress: {session.completed_count}/{len(session.all_selected_uuids)} "
             f"videos {session.completion_label.lower()} ({session.progress_pct}%)[/dim]"
         )
-        console.print(f"[dim]Elapsed: {elapsed_total/60:.1f}m | Avg batch: {avg_batch_time:.1f}s | Remaining: ~{eta_remaining/60:.1f}m[/dim]")
+        console.print(
+            f"[dim]Elapsed: {elapsed_total / 60:.1f}m | Avg batch: {avg_batch_time:.1f}s"
+            f" | Remaining: ~{eta_remaining / 60:.1f}m[/dim]"
+        )
 
         # Continue or pause
         if session.remaining_uuids:
@@ -520,7 +518,7 @@ def archive(
         )
         console.print("[dim]Use 'iphoto retry-failed' to retry.[/dim]")
     else:
-        console.print(f"\n[green]No failures![/green]")
+        console.print("\n[green]No failures![/green]")
 
     clear_session()
 
@@ -626,9 +624,9 @@ def retry_failed(
 
 @app.command()
 def verify(
-    manifest: Optional[Path] = typer.Option(
+    manifest: Path | None = typer.Option(
         None, "--manifest", "-m", help="Path to manifest JSON (defaults to current session)"
-    )
+    ),
 ) -> None:
     """Verify archived files against the manifest."""
     session = load_session()
@@ -694,9 +692,8 @@ def resume() -> None:
         for batch in session.batches:
             status = "✓ Complete" if batch.is_complete else "⏳ In Progress"
             completed = len(batch.deleted_uuids) if session.delete_enabled else len(batch.archived_uuids)
-            console.print(
-                f"  Batch {batch.batch_number}: {completed}/{len(batch.selected_uuids)} {session.completion_label.lower()} {status}"
-            )
+            label = session.completion_label.lower()
+            console.print(f"  Batch {batch.batch_number}: {completed}/{len(batch.selected_uuids)} {label} {status}")
 
     if not Confirm.ask("\nResume this session?"):
         if Confirm.ask("Clear this session?"):
@@ -751,9 +748,8 @@ def status() -> None:
             for batch in session.batches:
                 status = "✓ Complete" if batch.is_complete else "⏳ In Progress"
                 completed = len(batch.deleted_uuids) if session.delete_enabled else len(batch.archived_uuids)
-                console.print(
-                    f"  Batch {batch.batch_number}: {completed}/{len(batch.selected_uuids)} {session.completion_label.lower()} {status}"
-                )
+                label = session.completion_label.lower()
+                console.print(f"  Batch {batch.batch_number}: {completed}/{len(batch.selected_uuids)} {label} {status}")
 
         if Confirm.ask("\nClear this session?"):
             clear_session()

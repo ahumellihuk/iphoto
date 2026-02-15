@@ -5,10 +5,11 @@ Instead, we create a temporary album containing the archived videos so the
 user can select-all and delete from Photos.app UI in one step.
 """
 
+import contextlib
+
 import photoscript
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.prompt import Confirm
 
 from .models import VideoInfo, filter_ambiguous_filenames
 
@@ -36,9 +37,7 @@ def delete_from_photos(
 
     videos, failures = filter_ambiguous_filenames(videos, allow_ambiguous)
     if failures:
-        console.print(
-            f"[yellow]Skipped {len(failures)} videos with duplicate filenames.[/yellow]"
-        )
+        console.print(f"[yellow]Skipped {len(failures)} videos with duplicate filenames.[/yellow]")
 
     if not videos:
         return [], failures
@@ -57,10 +56,8 @@ def delete_from_photos(
 
         # Create or get the album
         album = None
-        try:
+        with contextlib.suppress(Exception):
             album = lib.album(ALBUM_NAME)
-        except Exception:
-            pass
         if album is None:
             album = lib.create_album(ALBUM_NAME)
             console.print(f"[dim]Created album '{ALBUM_NAME}'[/dim]")
@@ -86,11 +83,11 @@ def delete_from_photos(
                 progress.advance(task)
 
         console.print(f"\n[green]Added {len(staged)} videos to album '{ALBUM_NAME}'[/green]")
-        console.print(f"\n[bold cyan]To complete deletion:[/bold cyan]")
+        console.print("\n[bold cyan]To complete deletion:[/bold cyan]")
         console.print(f"  1. Open Photos.app > Albums > '{ALBUM_NAME}'")
-        console.print(f"  2. Select All (Cmd+A)")
+        console.print("  2. Select All (Cmd+A)")
         console.print(f"  3. Right-click > Delete {len(staged)} Videos")
-        console.print(f"  4. Items go to Recently Deleted (30-day recovery)")
+        console.print("  4. Items go to Recently Deleted (30-day recovery)")
 
         return staged, failures
 

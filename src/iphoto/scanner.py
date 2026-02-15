@@ -2,27 +2,24 @@
 
 import os
 import sqlite3
-from datetime import datetime, timezone, MINYEAR
+from datetime import UTC, datetime
 from datetime import datetime as dt_class
-from typing import Optional
 
 import osxphotos
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from .models import VideoInfo, MomentGroup
+from .models import MomentGroup, VideoInfo
 
 console = Console()
 
 
-def get_duration_map(library_path: Optional[str] = None) -> dict[str, float]:
+def get_duration_map(library_path: str | None = None) -> dict[str, float]:
     """Get video durations from Photos database."""
     if library_path:
         db_path = os.path.join(library_path, "database", "Photos.sqlite")
     else:
-        db_path = os.path.expanduser(
-            "~/Pictures/Photos Library.photoslibrary/database/Photos.sqlite"
-        )
+        db_path = os.path.expanduser("~/Pictures/Photos Library.photoslibrary/database/Photos.sqlite")
 
     duration_map: dict[str, float] = {}
     try:
@@ -59,9 +56,9 @@ def generate_moment_name(photo: osxphotos.PhotoInfo) -> str:
 
 
 def scan_videos(
-    min_age_days: Optional[int] = None,
-    min_size_mb: Optional[float] = None,
-    library_path: Optional[str] = None,
+    min_age_days: int | None = None,
+    min_size_mb: float | None = None,
+    library_path: str | None = None,
 ) -> list[VideoInfo]:
     """Scan Photos library for videos matching criteria."""
     with Progress(
@@ -96,12 +93,12 @@ def scan_videos(
                 continue
 
             # Handle timezone-aware dates
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             date_created = photo.date
             if date_created:
                 # Make naive datetime timezone-aware if needed
                 if date_created.tzinfo is None:
-                    date_created = date_created.replace(tzinfo=timezone.utc)
+                    date_created = date_created.replace(tzinfo=UTC)
             else:
                 date_created = now
 
@@ -127,11 +124,11 @@ def scan_videos(
             moment_name = None
             moment_pk = None
             try:
-                mi = getattr(photo, 'moment_info', None)
+                mi = getattr(photo, "moment_info", None)
                 if mi:
-                    moment_pk = getattr(mi, 'pk', None) or None
-                    title = getattr(mi, 'title', None)
-                    start_date = getattr(mi, 'start_date', None)
+                    moment_pk = getattr(mi, "pk", None) or None
+                    title = getattr(mi, "title", None)
+                    start_date = getattr(mi, "start_date", None)
                     if title and start_date:
                         if start_date.tzinfo:
                             start_date = start_date.astimezone().replace(tzinfo=None)
@@ -144,11 +141,8 @@ def scan_videos(
             # Check if video is locally available (not just in iCloud)
             # A video is considered local if it has a valid path or is not marked as cloud-only
             is_local = True
-            if hasattr(photo, 'incloud') and photo.incloud:
-                # Video is in iCloud - check if also available locally
-                # If path is None or doesn't exist, it's not local
-                if not photo.path or not os.path.exists(photo.path):
-                    is_local = False
+            if hasattr(photo, "incloud") and photo.incloud and (not photo.path or not os.path.exists(photo.path)):
+                is_local = False
 
             # Use native moment name if available, otherwise fall back to date-based
             if not moment_name:
@@ -186,19 +180,17 @@ def rank_videos(
         sort_by: One of "size", "duration", "age", "date"
         descending: Sort in descending order (largest/longest/oldest first)
     """
-    if sort_by == "duration":
-        key = lambda v: v.duration_seconds
-    elif sort_by == "age":
-        key = lambda v: v.age_days
-    elif sort_by == "date":
-        key = lambda v: v.date_created
-    else:  # default to size
-        key = lambda v: v.size_bytes
+    sort_keys = {
+        "duration": lambda v: v.duration_seconds,
+        "age": lambda v: v.age_days,
+        "date": lambda v: v.date_created,
+    }
+    key = sort_keys.get(sort_by, lambda v: v.size_bytes)
 
     return sorted(videos, key=key, reverse=descending)
 
 
-def group_by_moment(videos: list[VideoInfo], threshold_mb: Optional[float] = None) -> list[MomentGroup]:
+def group_by_moment(videos: list[VideoInfo], threshold_mb: float | None = None) -> list[MomentGroup]:
     """Group videos by their moment PK and create MomentGroup objects.
 
     Group by moment_pk (unique identifier) rather than moment_name to get granular
@@ -213,7 +205,7 @@ def group_by_moment(videos: list[VideoInfo], threshold_mb: Optional[float] = Non
     Returns:
         List of MomentGroup objects sorted by total size descending
     """
-    groups_dict: dict[Optional[int], list[VideoInfo]] = {}
+    groups_dict: dict[int | None, list[VideoInfo]] = {}
 
     for video in videos:
         # Use moment_pk as the primary key if available, otherwise fall back to name
@@ -255,9 +247,7 @@ def group_by_moment(videos: list[VideoInfo], threshold_mb: Optional[float] = Non
     return groups
 
 
-def rank_moments(
-    moments: list[MomentGroup], sort_by: str = "size", descending: bool = True
-) -> list[MomentGroup]:
+def rank_moments(moments: list[MomentGroup], sort_by: str = "size", descending: bool = True) -> list[MomentGroup]:
     """Sort moments by specified criteria.
 
     Args:
@@ -268,11 +258,10 @@ def rank_moments(
     Returns:
         Sorted list of MomentGroup objects
     """
-    if sort_by == "count":
-        key = lambda m: m.video_count
-    elif sort_by == "date":
-        key = lambda m: min(v.date_created for v in m.videos) if m.videos else dt_class.min
-    else:  # default to size
-        key = lambda m: m.total_size_bytes
+    sort_keys = {
+        "count": lambda m: m.video_count,
+        "date": lambda m: min(v.date_created for v in m.videos) if m.videos else dt_class.min,
+    }
+    key = sort_keys.get(sort_by, lambda m: m.total_size_bytes)
 
     return sorted(moments, key=key, reverse=descending)

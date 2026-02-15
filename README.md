@@ -1,23 +1,32 @@
 # iPhoto Video Archiver
 
+[![CI](https://github.com/camoiloc/iphoto/actions/workflows/ci.yml/badge.svg)](https://github.com/camoiloc/iphoto/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 Intelligently archive large and old videos from Apple Photos to external storage, freeing up local disk space while maintaining searchability.
 
 ## Quick Start
 
 ```bash
-# Setup
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+# Install with uv
+uv sync
 
 # Scan your library
-iphoto scan
+uv run iphoto scan
 
 # Archive videos (interactive)
-iphoto archive
+uv run iphoto archive
 
 # Check status
-iphoto status
+uv run iphoto status
+```
+
+Or install globally:
+
+```bash
+uv tool install .
+iphoto scan
 ```
 
 ## The Problem
@@ -31,12 +40,12 @@ iphoto status
 ## The Solution
 
 This tool helps you:
-1. 📊 **Identify** videos worth archiving (large, old, duplicates)
-2. 📤 **Export** original files from Photos
-3. 💾 **Archive** to external storage with organization
-4. ✅ **Verify** with checksums
-5. 🗑️ **Delete** from Photos library (after confirmation)
-6. 📝 **Manifest** maintains searchable record of archived content
+1. **Identify** videos worth archiving (large, old, duplicates)
+2. **Export** original files from Photos
+3. **Archive** to external storage with organization
+4. **Verify** with checksums
+5. **Delete** from Photos library (after confirmation)
+6. **Manifest** maintains searchable record of archived content
 
 ## Features
 
@@ -57,71 +66,6 @@ This tool helps you:
 - **Original filenames**: Preserved for easy identification
 - **JSONL manifest**: Search archived content
 - **Checksum verification**: Ensure integrity
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Photos Library                                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                 │
-│  │ Video 1  │  │ Video 2  │  │ Video 3  │  ...            │
-│  │ (iCloud) │  │ (Local)  │  │ (iCloud) │                 │
-│  └──────────┘  └──────────┘  └──────────┘                 │
-└────────┬────────────────────────────────────────────────────┘
-         │
-         │ ① Scanner (osxphotos)
-         │    - Reads Photos DB
-         │    - Extracts metadata
-         ↓
-    ┌────────────────────────┐
-    │ Video Inventory        │
-    │ - 5408 videos          │
-    │ - 1534 GB total        │
-    │ - Moments grouped      │
-    └──────┬─────────────────┘
-           │
-           │ ② Selector (Interactive TUI)
-           │    - User chooses moments
-           │    - Sets size thresholds
-           ↓
-      ┌─────────────────┐
-      │ Selected Videos │
-      │ - 150 videos    │
-      │ - 250 GB        │
-      └────┬────────────┘
-           │
-           │ ③ Exporter (AppleScript/osxphotos)
-           │    - Exports from Photos.app
-           │    - Sequential processing
-           ↓
-    ┌──────────────────────┐
-    │ Staging Directory    │
-    │ ~/PhotosStaging/     │
-    │ ├─ London 2024/      │
-    │ ├─ Japan Trip/       │
-    │ └─ ...               │
-    └────┬─────────────────┘
-         │
-         │ ④ Mover
-         │    - Checksums
-         │    - Copy to external
-         ↓
-    ┌──────────────────────┐
-    │ External Archive     │
-    │ /Volumes/Photos/     │
-    │ ├─ London 2024/      │
-    │ ├─ Japan Trip/       │
-    │ └─ manifest.jsonl    │
-    └────┬─────────────────┘
-         │
-         │ ⑤ Deleter
-         │    - Remove from Photos
-         ↓
-    ┌──────────────────────┐
-    │ Photos Library       │
-    │ (250 GB freed)       │
-    └──────────────────────┘
-```
 
 ## Usage
 
@@ -173,109 +117,36 @@ iphoto verify /Volumes/MyDrive/archive
 iphoto retry-failed
 ```
 
-## Configuration
+## Requirements
 
-### Recommended Setup
-
-1. **External Drive**: USB 3.0+ or Thunderbolt, formatted APFS/HFS+
-2. **Staging Space**: ~50GB free on Mac for temporary exports
-3. **Photos Library**: Ensure Photos.app can access it
-4. **Automation**: Grant Terminal/iTerm access to Photos in System Preferences
-
-### Defaults
-
-```python
-DEFAULT_STAGING = ~/PhotosStaging
-DEFAULT_EXTERNAL = /Volumes/AcerFA200/Photos-Archive
-DEFAULT_THRESHOLD = 100 MB
-DEFAULT_TIMEOUT = 1800s (30min for iCloud downloads)
-```
-
-## Current Status
-
-⚠️ **Active Development** - iCloud export feature under investigation
-
-**What Works:**
-- ✅ Scanning and video identification
-- ✅ Moment-based selection UI
-- ✅ Local video export and archival
-- ✅ Manifest generation
-- ✅ Resume capability
-
-**Known Issues:**
-- ⚠️ **iCloud video export unreliable** - Photos.app doesn't consistently download from iCloud during export
-- See [INVESTIGATION.md](INVESTIGATION.md) for details
-
-**For Developers:**
-- See [CLAUDE.md](CLAUDE.md) for complete project context
-- See [INVESTIGATION.md](INVESTIGATION.md) for current issue investigation
-
-## Safety Features
-
-### Pre-Flight Checks
-- ✅ Verify external drive has space
-- ✅ Check staging directory writeable
-- ✅ Validate Photos library accessible
-- ✅ Confirm selections before deletion
-
-### During Processing
-- ✅ SHA256 checksums for every file
-- ✅ Verify file exists before deletion
-- ✅ State saved after each phase
-- ✅ Can resume from interruption
-
-### Post-Archive
-- ✅ Manifest of all archived videos
-- ✅ Verification command to check integrity
-- ✅ Original files on external drive
-
-## Manifest Format
-
-Archived videos are tracked in `manifest.jsonl`:
-
-```json
-{"uuid": "ABC-123", "filename": "IMG_1234.MOV", "moment": "London 2024",
- "size_bytes": 2147483648, "date_created": "2024-06-15T14:30:00",
- "archived_path": "/Volumes/Photos/London 2024/IMG_1234.MOV",
- "checksum": "sha256:abc123...", "archived_at": "2026-01-30T10:00:00"}
-```
-
-Search your archive:
-```bash
-# Find videos from a location
-grep "London" manifest.jsonl
-
-# Find large videos
-jq 'select(.size_bytes > 1000000000)' manifest.jsonl
-
-# Find videos from date range
-jq 'select(.date_created > "2024-01-01")' manifest.jsonl
-```
-
-## Recovery
-
-### Restore Videos
-
-1. Locate video in manifest
-2. Copy from external archive back to Mac
-3. Import into Photos.app via drag-and-drop
-4. Photos will recognize and restore metadata
-
-### Emergency Stop
-
-If something goes wrong:
-```bash
-# Stop at current phase (safe - no data loss)
-Ctrl+C
-
-# Resume later
-iphoto resume
-
-# Or start fresh
-rm ~/.iphoto_session.json
-```
+- macOS 14+
+- Python 3.12+
+- Photos.app
+- External storage drive
 
 ## Development
+
+### Setup
+
+```bash
+# Clone and install
+git clone https://github.com/camoiloc/iphoto.git
+cd iphoto
+uv sync
+
+# Run linter
+uv run ruff check src/
+uv run ruff format --check src/
+
+# Run tests
+uv run pytest tests/ -v
+
+# Type checking
+uv run mypy src/iphoto/models.py
+
+# Install pre-commit hooks
+uv run pre-commit install
+```
 
 ### Project Structure
 
@@ -285,65 +156,47 @@ iphoto/
 │   ├── cli.py                 # CLI entry point
 │   ├── scanner.py             # Photos library scanning
 │   ├── selector.py            # Interactive selection UI
-│   ├── exporter.py            # Parallel export orchestration
+│   ├── exporter.py            # Export orchestration
 │   ├── applescript_exporter.py # AppleScript export implementation
 │   ├── mover.py               # Archive to external storage
 │   ├── deleter.py             # Delete from Photos
 │   ├── manifest.py            # Manifest management
 │   └── models.py              # Data models
-├── CLAUDE.md                  # Complete project context
-├── INVESTIGATION.md           # Current issue investigation
+├── tests/
+│   └── test_models.py         # Unit tests for pure-logic functions
+├── .github/workflows/ci.yml   # GitHub Actions CI
+├── CLAUDE.md                  # Full project context
 └── README.md                  # This file
-```
-
-### Running Tests
-
-Test files (test_*.py, debug_*.py) are gitignored and not included in the repository.
-If you have local test scripts, run them from the project root:
-
-```bash
-source .venv/bin/activate
-python test_local_video.py
 ```
 
 ### Contributing
 
-1. Read [CLAUDE.md](CLAUDE.md) for full context
-2. Check [INVESTIGATION.md](INVESTIGATION.md) for current issues
-3. Write tests for new features
-4. Ensure type hints on all functions
+1. Read [CLAUDE.md](CLAUDE.md) for full technical context
+2. Write tests for new features
+3. Ensure `uv run ruff check src/` and `uv run pytest` pass
+4. Type hints on all functions
 5. Use Rich console for user output
 
-## Requirements
+## Current Status
 
-- macOS 14+ (tested on macOS 26.2)
-- Python 3.11+
-- Photos.app
-- osxphotos library
-- photoscript library
-- External storage drive
+**Active Development** - iCloud export feature under investigation
+
+**What Works:**
+- Scanning and video identification
+- Moment-based selection UI
+- Local video export and archival
+- Manifest generation
+- Resume capability
+
+**Known Issues:**
+- iCloud video export unreliable - Photos.app doesn't consistently download from iCloud during export
 
 ## License
 
-MIT
+[GPL-3.0-or-later](LICENSE)
 
 ## Acknowledgments
 
 - [osxphotos](https://github.com/RhetTbull/osxphotos) by Rhet Turnbull - Excellent Photos library interface
 - [Rich](https://github.com/Textualize/rich) - Beautiful terminal UI
 - [Typer](https://github.com/tiangolo/typer) - CLI framework
-
-## Support
-
-**Issues:** See [INVESTIGATION.md](INVESTIGATION.md) for known issues
-
-**Documentation:**
-- [CLAUDE.md](CLAUDE.md) - Full technical context
-- [INVESTIGATION.md](INVESTIGATION.md) - Current investigation
-- [README.md](README.md) - This file (user guide)
-
----
-
-**Status:** Active development - local archival works, iCloud export under investigation
-**Version:** 0.2.0a1
-**Last Updated:** 2026-02-13

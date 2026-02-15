@@ -12,9 +12,9 @@ build/
 !.claude/quick-start.md
 *.iml
 
-# Test outputs
-test_*.py
+# Ad-hoc test/debug scripts (not the tests/ directory)
+/test_*.py
 /tmp/iphoto_*
 /tmp/*photo*
-check_*.py
-debug_*.py
+/check_*.py
+/debug_*.py

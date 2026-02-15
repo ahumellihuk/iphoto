@@ -1,9 +1,8 @@
 """Data models for iphoto."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 from uuid import uuid4
 
 
@@ -20,10 +19,10 @@ class VideoInfo:
     duration_seconds: float
     width: int
     height: int
-    location: Optional[tuple[float, float]] = None  # (lat, lon)
-    place_name: Optional[str] = None
+    location: tuple[float, float] | None = None  # (lat, lon)
+    place_name: str | None = None
     moment_name: str = ""
-    moment_pk: Optional[int] = None  # Unique moment identifier in Photos database
+    moment_pk: int | None = None  # Unique moment identifier in Photos database
     is_local: bool = True  # False if video is in iCloud but not downloaded locally
 
     @property
@@ -36,10 +35,10 @@ class VideoInfo:
 
     @property
     def age_days(self) -> int:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         date = self.date_created
         if date.tzinfo is None:
-            date = date.replace(tzinfo=timezone.utc)
+            date = date.replace(tzinfo=UTC)
         return (now - date).days
 
     @property
@@ -80,11 +79,11 @@ class MomentGroup:
 
     name: str  # Display name: "Location • Date" format
     key: str = ""  # Stable selection key (pk-based when available)
-    pk: Optional[int] = None  # Unique moment identifier in Photos database
+    pk: int | None = None  # Unique moment identifier in Photos database
     location_title: str = ""  # Just the location name (e.g., "London")
     videos: list[VideoInfo] = field(default_factory=list)
     threshold_mb: float = 100.0
-    smart_threshold_mb: Optional[float] = None  # Per-moment optimal threshold
+    smart_threshold_mb: float | None = None  # Per-moment optimal threshold
 
     @property
     def video_count(self) -> int:
@@ -132,7 +131,7 @@ class MomentGroup:
     @property
     def space_to_reclaim(self) -> float:
         """Space in GB that would be freed by archiving videos above threshold."""
-        return sum(v.size_bytes for v in self.videos_above_threshold()) / (1024 ** 3)
+        return sum(v.size_bytes for v in self.videos_above_threshold()) / (1024**3)
 
     def calculate_smart_threshold(self) -> float:
         """Calculate optimal threshold for this moment's video distribution.
@@ -171,7 +170,7 @@ class BatchProgress:
     failed_deletes: dict[str, str] = field(default_factory=dict)
     checksums: dict[str, str] = field(default_factory=dict)
     started_at: datetime = field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
     @property
     def is_complete(self) -> bool:
@@ -199,17 +198,17 @@ class SessionState:
     created_at: datetime = field(default_factory=datetime.now)
 
     # Configuration
-    threshold_mb: Optional[float] = None
-    min_age_days: Optional[int] = None
-    min_size_mb: Optional[float] = None
+    threshold_mb: float | None = None
+    min_age_days: int | None = None
+    min_size_mb: float | None = None
     use_moments: bool = True
-    batch_size: Optional[int] = None
+    batch_size: int | None = None
     export_timeout: int = 1800
     delete_timeout: int = 120
     delete_enabled: bool = True
     allow_ambiguous: bool = False
-    library_path: Optional[str] = None
-    manifest_path: Optional[str] = None
+    library_path: str | None = None
+    manifest_path: str | None = None
 
     # All selected videos for session
     all_selected_uuids: list[str] = field(default_factory=list)
@@ -230,7 +229,7 @@ class SessionState:
     total_failed_deletes: int = 0
 
     @property
-    def current_batch(self) -> Optional[BatchProgress]:
+    def current_batch(self) -> BatchProgress | None:
         """Get the current/last batch."""
         if self.batches and self.current_batch_number > 0:
             return self.batches[self.current_batch_number - 1]
@@ -353,27 +352,29 @@ class SessionState:
         )
         session.videos = [video_from_dict(v) for v in data.get("videos", [])]
         for bd in data.get("batches", []):
-            session.batches.append(BatchProgress(
-                batch_number=bd["batch_number"],
-                selected_uuids=bd.get("selected_uuids", []),
-                exported_uuids=bd.get("exported_uuids", []),
-                archived_uuids=bd.get("archived_uuids", []),
-                deleted_uuids=bd.get("deleted_uuids", []),
-                failed_exports=bd.get("failed_exports", {}),
-                failed_deletes=bd.get("failed_deletes", {}),
-                checksums=bd.get("checksums", {}),
-                started_at=datetime.fromisoformat(bd["started_at"]),
-                completed_at=datetime.fromisoformat(bd["completed_at"]) if bd.get("completed_at") else None,
-            ))
+            session.batches.append(
+                BatchProgress(
+                    batch_number=bd["batch_number"],
+                    selected_uuids=bd.get("selected_uuids", []),
+                    exported_uuids=bd.get("exported_uuids", []),
+                    archived_uuids=bd.get("archived_uuids", []),
+                    deleted_uuids=bd.get("deleted_uuids", []),
+                    failed_exports=bd.get("failed_exports", {}),
+                    failed_deletes=bd.get("failed_deletes", {}),
+                    checksums=bd.get("checksums", {}),
+                    started_at=datetime.fromisoformat(bd["started_at"]),
+                    completed_at=datetime.fromisoformat(bd["completed_at"]) if bd.get("completed_at") else None,
+                )
+            )
         return session
 
 
 def format_bytes(n: int) -> str:
     """Format byte count as human-readable string."""
-    gb = n / (1024 ** 3)
+    gb = n / (1024**3)
     if gb >= 1:
         return f"{gb:.2f} GB"
-    return f"{n / (1024 ** 2):.1f} MB"
+    return f"{n / (1024**2):.1f} MB"
 
 
 def filter_ambiguous_filenames(

@@ -4,7 +4,6 @@ import hashlib
 import shutil
 import time
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 from rich.progress import (
@@ -15,8 +14,8 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from .models import VideoInfo, filter_ambiguous_filenames
 from .applescript_exporter import activate_photos, export_via_applescript
+from .models import VideoInfo, filter_ambiguous_filenames
 
 console = Console()
 
@@ -33,8 +32,8 @@ def compute_sha256(file_path: Path) -> str:
 def sanitize_folder_name(name: str) -> str:
     """Sanitize a string for use as a folder name."""
     # Replace problematic characters
-    for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
-        name = name.replace(char, '-')
+    for char in ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]:
+        name = name.replace(char, "-")
     return name.strip()
 
 
@@ -42,8 +41,8 @@ def _export_single_video(
     video: VideoInfo,
     staging_path: Path,
     timeout_seconds: int = 1800,
-    icloud_timeout_seconds: Optional[int] = None,
-) -> tuple[str, Optional[tuple[Path, str]], Optional[str]]:
+    icloud_timeout_seconds: int | None = None,
+) -> tuple[str, tuple[Path, str] | None, str | None]:
     """Export one video via AppleScript.
 
     Returns: (uuid, (path, checksum) or None, error or None)
@@ -87,7 +86,7 @@ def _export_batch(
     videos: list[VideoInfo],
     staging_path: Path,
     timeout_seconds: int = 1800,
-    icloud_timeout_seconds: Optional[int] = None,
+    icloud_timeout_seconds: int | None = None,
 ) -> tuple[dict[str, tuple[Path, str]], dict[str, str]]:
     """Export videos sequentially with progress tracking.
 
@@ -113,7 +112,10 @@ def _export_batch(
 
         for i, video in enumerate(videos):
             uuid, result, error = _export_single_video(
-                video, staging_path, timeout_seconds, icloud_timeout_seconds,
+                video,
+                staging_path,
+                timeout_seconds,
+                icloud_timeout_seconds,
             )
 
             if error:
@@ -128,8 +130,10 @@ def _export_batch(
 
     total_time = time.time() - batch_start
     success_rate = len(results) / len(videos) * 100 if videos else 0
-    console.print(f"\n[dim]Batch summary: {len(results)}/{len(videos)} exported "
-                 f"in {total_time:.1f}s ({success_rate:.0f}% success)[/dim]")
+    console.print(
+        f"\n[dim]Batch summary: {len(results)}/{len(videos)} exported "
+        f"in {total_time:.1f}s ({success_rate:.0f}% success)[/dim]"
+    )
 
     return results, failures
 
@@ -137,7 +141,7 @@ def _export_batch(
 def calculate_batch_size(
     staging_path: Path,
     remaining_videos: list[VideoInfo],
-    override_size: Optional[int] = None,
+    override_size: int | None = None,
 ) -> int:
     """Calculate optimal batch size based on available staging space.
 
@@ -178,12 +182,11 @@ def calculate_batch_size(
         # Apply constraints: fit in available space, don't exceed remaining count
         batch_size = max(1, min(space_based, len(remaining_videos)))
 
-        available_gb = usable_bytes / (1024 ** 3)
-        total_batch_size_gb = (batch_size * avg_size) / (1024 ** 3)
+        available_gb = usable_bytes / (1024**3)
+        total_batch_size_gb = (batch_size * avg_size) / (1024**3)
 
         console.print(
-            f"[dim]Batch size: {batch_size} videos "
-            f"({total_batch_size_gb:.2f}/{available_gb:.2f} GB available)[/dim]"
+            f"[dim]Batch size: {batch_size} videos ({total_batch_size_gb:.2f}/{available_gb:.2f} GB available)[/dim]"
         )
         return batch_size
 
@@ -195,7 +198,7 @@ def calculate_batch_size(
 def export_videos(
     videos: list[VideoInfo],
     staging_path: Path,
-    library_path: Optional[str] = None,
+    library_path: str | None = None,
     timeout_seconds: int = 1800,  # 30 minutes - iCloud downloads can be slow
     allow_ambiguous: bool = False,
 ) -> tuple[dict[str, tuple[Path, str]], dict[str, str]]:
@@ -228,7 +231,8 @@ def export_videos(
     videos, pre_failures = filter_ambiguous_filenames(videos, allow_ambiguous)
     if pre_failures:
         console.print(
-            f"[yellow]Skipped {len(pre_failures)} videos with duplicate filenames. Use --allow-ambiguous to override.[/yellow]"
+            f"[yellow]Skipped {len(pre_failures)} videos with duplicate filenames."
+            " Use --allow-ambiguous to override.[/yellow]"
         )
 
     # Count iCloud videos and inform users
@@ -237,7 +241,7 @@ def export_videos(
 
     if icloud_count > 0:
         icloud_pct = int(100 * icloud_count / len(videos))
-        console.print(f"\n[cyan]ℹ {icloud_count}/{len(videos)} videos ({icloud_pct}%) are iCloud-only[/cyan]")
+        console.print(f"\n[cyan](i) {icloud_count}/{len(videos)} videos ({icloud_pct}%) are iCloud-only[/cyan]")
         console.print("[cyan]Photos.app will download these automatically during export.[/cyan]")
         console.print("\n[dim]Troubleshooting if exports fail:[/dim]")
         console.print("[dim]  • Ensure iCloud Photo Library is enabled in Photos.app[/dim]")
