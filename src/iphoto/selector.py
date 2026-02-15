@@ -46,9 +46,11 @@ def get_total_disk_space(path: Path) -> float | None:
         return None
 
 
-def suggest_archive_destinations(external_path: Path) -> list[Path]:
+def suggest_archive_destinations(external_path: Path | None = None) -> list[Path]:
     """Build a deduplicated list of likely archive destinations."""
-    candidates = [external_path]
+    candidates: list[Path] = []
+    if external_path is not None:
+        candidates.append(external_path)
 
     volumes_root = Path("/Volumes")
     if volumes_root.exists():
@@ -71,9 +73,9 @@ def suggest_archive_destinations(external_path: Path) -> list[Path]:
     return deduped
 
 
-def choose_archive_destination(external_path: Path) -> Path:
+def choose_archive_destination(external_path: Path | None = None) -> Path:
     """Interactively choose archive destination and show available disk space."""
-    selected_path = external_path
+    selected_path = external_path or (Path.home() / "Photos-archive")
 
     while True:
         candidates = suggest_archive_destinations(selected_path)

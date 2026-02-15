@@ -15,6 +15,7 @@ from rich.progress import (
 )
 
 from .applescript_exporter import activate_photos, export_via_applescript
+from .config import DEFAULT_EXPORT_TIMEOUT, ICLOUD_MIN_TIMEOUT, STAGING_SAFETY_MARGIN
 from .models import VideoInfo, filter_ambiguous_filenames
 
 console = Console()
@@ -40,7 +41,7 @@ def sanitize_folder_name(name: str) -> str:
 def _export_single_video(
     video: VideoInfo,
     staging_path: Path,
-    timeout_seconds: int = 1800,
+    timeout_seconds: int = DEFAULT_EXPORT_TIMEOUT,
     icloud_timeout_seconds: int | None = None,
 ) -> tuple[str, tuple[Path, str] | None, str | None]:
     """Export one video via AppleScript.
@@ -58,7 +59,7 @@ def _export_single_video(
 
         effective_timeout = timeout_seconds
         if not video.is_local:
-            effective_timeout = max(timeout_seconds, icloud_timeout_seconds or 3600)
+            effective_timeout = max(timeout_seconds, icloud_timeout_seconds or ICLOUD_MIN_TIMEOUT)
 
         success, exported_path, error_msg = export_via_applescript(
             uuid=video.uuid,
@@ -85,7 +86,7 @@ def _export_single_video(
 def _export_batch(
     videos: list[VideoInfo],
     staging_path: Path,
-    timeout_seconds: int = 1800,
+    timeout_seconds: int = DEFAULT_EXPORT_TIMEOUT,
     icloud_timeout_seconds: int | None = None,
 ) -> tuple[dict[str, tuple[Path, str]], dict[str, str]]:
     """Export videos sequentially with progress tracking.
@@ -170,7 +171,7 @@ def calculate_batch_size(
         # Get available staging space
         disk_usage = shutil.disk_usage(staging_path)
         available_bytes = disk_usage.free
-        usable_bytes = available_bytes * 0.70  # 70% safety margin
+        usable_bytes = available_bytes * STAGING_SAFETY_MARGIN
 
         # Calculate average video size from remaining videos
         total_size = sum(v.size_bytes for v in remaining_videos)
@@ -199,7 +200,7 @@ def export_videos(
     videos: list[VideoInfo],
     staging_path: Path,
     library_path: str | None = None,
-    timeout_seconds: int = 1800,  # 30 minutes - iCloud downloads can be slow
+    timeout_seconds: int = DEFAULT_EXPORT_TIMEOUT,  # 30 minutes - iCloud downloads can be slow
     allow_ambiguous: bool = False,
 ) -> tuple[dict[str, tuple[Path, str]], dict[str, str]]:
     """
@@ -249,7 +250,7 @@ def export_videos(
         console.print("[dim]  • Check that videos are accessible in Photos.app[/dim]\n")
 
     # Export sequentially (AppleScript is inherently sequential)
-    icloud_timeout_seconds = max(timeout_seconds, 3600)
+    icloud_timeout_seconds = max(timeout_seconds, ICLOUD_MIN_TIMEOUT)
     results, failures = _export_batch(
         videos=videos,
         staging_path=staging_path,

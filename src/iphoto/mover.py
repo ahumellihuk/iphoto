@@ -18,8 +18,6 @@ from .models import format_bytes
 
 console = Console()
 
-DEFAULT_EXTERNAL_PATH = Path("/Volumes/AcerFA200/Photos-archive")
-
 
 def check_external_mounted(external_path: Path) -> bool:
     """Check if external drive is mounted."""
@@ -54,7 +52,7 @@ def get_available_space(path: Path) -> int:
 
 def move_to_archive(
     exported: dict[str, tuple[Path, str]],
-    external_path: Path = DEFAULT_EXTERNAL_PATH,
+    external_path: Path,
     verify: bool = True,
 ) -> dict[str, Path]:
     """

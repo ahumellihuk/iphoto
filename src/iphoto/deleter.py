@@ -11,17 +11,16 @@ import photoscript
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from .config import DEFAULT_DELETE_TIMEOUT, DELETE_ALBUM_NAME
 from .models import VideoInfo, filter_ambiguous_filenames
 
 console = Console()
-
-ALBUM_NAME = "iphoto - Ready to Delete"
 
 
 def delete_from_photos(
     videos: list[VideoInfo],
     dry_run: bool = False,
-    timeout_seconds: int = 120,
+    timeout_seconds: int = DEFAULT_DELETE_TIMEOUT,
     allow_ambiguous: bool = False,
 ) -> tuple[list[str], dict[str, str]]:
     """
@@ -57,10 +56,10 @@ def delete_from_photos(
         # Create or get the album
         album = None
         with contextlib.suppress(Exception):
-            album = lib.album(ALBUM_NAME)
+            album = lib.album(DELETE_ALBUM_NAME)
         if album is None:
-            album = lib.create_album(ALBUM_NAME)
-            console.print(f"[dim]Created album '{ALBUM_NAME}'[/dim]")
+            album = lib.create_album(DELETE_ALBUM_NAME)
+            console.print(f"[dim]Created album '{DELETE_ALBUM_NAME}'[/dim]")
 
         staged: list[str] = []
 
@@ -82,9 +81,9 @@ def delete_from_photos(
                     console.print(f"  [yellow]Could not add {video.original_filename}: {e}[/yellow]")
                 progress.advance(task)
 
-        console.print(f"\n[green]Added {len(staged)} videos to album '{ALBUM_NAME}'[/green]")
+        console.print(f"\n[green]Added {len(staged)} videos to album '{DELETE_ALBUM_NAME}'[/green]")
         console.print("\n[bold cyan]To complete deletion:[/bold cyan]")
-        console.print(f"  1. Open Photos.app > Albums > '{ALBUM_NAME}'")
+        console.print(f"  1. Open Photos.app > Albums > '{DELETE_ALBUM_NAME}'")
         console.print("  2. Select All (Cmd+A)")
         console.print(f"  3. Right-click > Delete {len(staged)} Videos")
         console.print("  4. Items go to Recently Deleted (30-day recovery)")

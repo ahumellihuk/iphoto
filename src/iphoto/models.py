@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from .config import DEFAULT_DELETE_TIMEOUT, DEFAULT_EXPORT_TIMEOUT
+
 
 @dataclass
 class VideoInfo:
@@ -203,8 +205,8 @@ class SessionState:
     min_size_mb: float | None = None
     use_moments: bool = True
     batch_size: int | None = None
-    export_timeout: int = 1800
-    delete_timeout: int = 120
+    export_timeout: int = DEFAULT_EXPORT_TIMEOUT
+    delete_timeout: int = DEFAULT_DELETE_TIMEOUT
     delete_enabled: bool = True
     allow_ambiguous: bool = False
     library_path: str | None = None
@@ -333,8 +335,8 @@ class SessionState:
             min_size_mb=data.get("min_size_mb"),
             use_moments=data.get("use_moments", True),
             batch_size=data.get("batch_size"),
-            export_timeout=data.get("export_timeout", 1800),
-            delete_timeout=data.get("delete_timeout", 120),
+            export_timeout=data.get("export_timeout", DEFAULT_EXPORT_TIMEOUT),
+            delete_timeout=data.get("delete_timeout", DEFAULT_DELETE_TIMEOUT),
             delete_enabled=data.get("delete_enabled", True),
             allow_ambiguous=data.get("allow_ambiguous", False),
             library_path=data.get("library_path"),

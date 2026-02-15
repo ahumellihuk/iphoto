@@ -11,11 +11,19 @@ from rich.console import Console
 from rich.prompt import Confirm
 
 from . import __version__
+from .config import (
+    DEFAULT_DELETE_TIMEOUT,
+    DEFAULT_EXPORT_TIMEOUT,
+    DEFAULT_STAGING,
+    LAST_DESTINATION_FILE,
+    SESSION_FILE,
+    STAGING_SAFETY_MARGIN,
+)
 from .deleter import delete_from_photos
 from .exporter import calculate_batch_size, compute_sha256, export_videos
 from .manifest import append_manifest_entries, build_manifest_entry, load_manifest
 from .models import BatchProgress, SessionState, VideoInfo, format_bytes
-from .mover import DEFAULT_EXTERNAL_PATH, check_external_mounted, cleanup_staging, move_to_archive
+from .mover import check_external_mounted, cleanup_staging, move_to_archive
 from .scanner import group_by_moment, rank_videos, scan_videos
 from .selector import (
     choose_archive_destination,
@@ -33,9 +41,6 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
-
-DEFAULT_STAGING = Path.home() / "PhotosStaging"
-SESSION_FILE = Path.home() / ".iphoto_session.json"
 
 
 def save_session(session: SessionState) -> None:
@@ -61,6 +66,28 @@ def clear_session() -> None:
     """Clear saved multi-batch session state."""
     if SESSION_FILE.exists():
         SESSION_FILE.unlink()
+
+
+def save_last_destination(path: Path) -> None:
+    """Persist last selected archive destination path."""
+    try:
+        LAST_DESTINATION_FILE.write_text(str(path))
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not save last destination: {e}[/yellow]")
+
+
+def load_last_destination() -> Path | None:
+    """Load last selected archive destination path, if available."""
+    if not LAST_DESTINATION_FILE.exists():
+        return None
+    try:
+        raw = LAST_DESTINATION_FILE.read_text().strip()
+        if not raw:
+            return None
+        return Path(raw).expanduser()
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not load last destination: {e}[/yellow]")
+        return None
 
 
 @app.command()
@@ -106,8 +133,7 @@ def scan(
 
 def _resume_or_create_session(
     staging: Path,
-    external: Path,
-    choose_external: bool,
+    external: Path | None,
     min_age_days: int | None,
     min_size_mb: float | None,
     threshold_mb: float | None,
@@ -131,7 +157,7 @@ def _resume_or_create_session(
         if Confirm.ask("Resume this session?"):
             session = existing_session
             if not session.manifest_path:
-                session.manifest_path = str(external / f"iphoto_manifest_{session.session_id}.json")
+                session.manifest_path = str(session.external_path / f"iphoto_manifest_{session.session_id}.json")
                 save_session(session)
             if session.videos:
                 return session, session.videos
@@ -147,9 +173,10 @@ def _resume_or_create_session(
             return None
 
     # New session
-    if choose_external:
-        external = choose_archive_destination(external)
-        console.print(f"[cyan]Archive destination: {external}[/cyan]\n")
+    seed_destination = external or load_last_destination()
+    external = choose_archive_destination(seed_destination)
+    save_last_destination(external)
+    console.print(f"[cyan]Archive destination: {external}[/cyan]\n")
 
     console.print("[bold]Step 1:[/bold] Scanning Photos library...\n")
     all_videos = scan_videos(min_age_days=min_age_days, min_size_mb=min_size_mb, library_path=library)
@@ -176,6 +203,7 @@ def _resume_or_create_session(
         console.print("[yellow]No videos selected. Exiting.[/yellow]")
         return None
 
+    assert external is not None
     session = SessionState(
         staging_path=staging,
         external_path=external,
@@ -300,12 +328,7 @@ def _archive_batch_phase(
 @app.command()
 def archive(
     staging: Path = typer.Option(DEFAULT_STAGING, "--staging", "-s", help="Local staging directory"),
-    external: Path = typer.Option(DEFAULT_EXTERNAL_PATH, "--external", "-e", help="External archive directory"),
-    choose_external: bool = typer.Option(
-        True,
-        "--choose-external/--no-choose-external",
-        help="Prompt to choose archive destination and show free disk space",
-    ),
+    external: Path | None = typer.Option(None, "--external", "-e", help="Initial archive directory suggestion"),
     min_age_days: int | None = typer.Option(None, "--min-age", "-a", help="Minimum age in days"),
     min_size_mb: float | None = typer.Option(None, "--min-size", "-m", help="Minimum size in MB"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without making changes"),
@@ -321,10 +344,14 @@ def archive(
     ),
     library: str | None = typer.Option(None, "--library", "-l", help="Path to Photos library"),
     export_timeout: int = typer.Option(
-        1800, "--export-timeout", help="Timeout per video export in seconds (default: 30min for iCloud downloads)"
+        DEFAULT_EXPORT_TIMEOUT,
+        "--export-timeout",
+        help="Timeout per video export in seconds (default: 30min for iCloud downloads)",
     ),
     delete_timeout: int = typer.Option(
-        120, "--delete-timeout", help="Timeout per video deletion in seconds (default: 2min)"
+        DEFAULT_DELETE_TIMEOUT,
+        "--delete-timeout",
+        help="Timeout per video deletion in seconds (default: 2min)",
     ),
     batch_size: int | None = typer.Option(None, "--batch-size", help="Override automatic batch sizing (optional)"),
     continuous: bool = typer.Option(
@@ -343,7 +370,6 @@ def archive(
     result = _resume_or_create_session(
         staging=staging,
         external=external,
-        choose_external=choose_external,
         min_age_days=min_age_days,
         min_size_mb=min_size_mb,
         threshold_mb=threshold_mb,
@@ -408,7 +434,7 @@ def archive(
         # Safety check: verify batch actually fits in staging space
         actual_batch_size_bytes = sum(v.size_bytes for v in batch_videos)
         disk_usage = shutil.disk_usage(staging)
-        usable_bytes = disk_usage.free * 0.70
+        usable_bytes = disk_usage.free * STAGING_SAFETY_MARGIN
 
         # If batch exceeds available space, reduce it
         if actual_batch_size_bytes > usable_bytes:

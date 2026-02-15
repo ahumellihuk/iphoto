@@ -53,8 +53,8 @@ iphoto scan
 # Start interactive archival (includes destination picker with free-space info)
 iphoto archive
 
-# Skip destination picker in scripted runs
-iphoto archive --no-choose-external
+# Optionally pre-seed destination picker with a preferred path
+iphoto archive --external /Volumes/MyDrive/Photos-archive
 
 # Resume an interrupted run
 iphoto resume
