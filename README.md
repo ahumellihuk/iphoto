@@ -36,10 +36,10 @@ uv sync
 uv run iphoto version
 ```
 
-Or install as a tool:
+After publishing to PyPI:
 
 ```bash
-uv tool install .
+uv tool install iphoto
 iphoto version
 ```
 
@@ -72,6 +72,19 @@ iphoto status
 - Manifest records what was archived and where.
 - Deletion is optional and explicit.
 
+## Publishing
+
+```bash
+uv build
+uv publish
+```
+
+Recommended: configure PyPI Trusted Publisher for this GitHub repository and publish from tagged releases.
+
+## AI Assistance Disclosure
+
+Portions of this codebase were developed with assistance from Claude and Codex. All proposed changes are reviewed and accepted by a human maintainer before release.
+
 ## Development
 
 ```bash
@@ -81,6 +94,12 @@ uv run ruff format --check src/
 uv run mypy src/iphoto/models.py
 uv run pytest tests/ -v
 ```
+
+See `AGENTS.md` and `CONTRIBUTING.md` for contribution workflow.
+
+## Security
+
+See `SECURITY.md` for reporting guidance.
 
 ## License
 

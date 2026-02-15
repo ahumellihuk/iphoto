@@ -57,6 +57,12 @@ uv run pytest tests/ -v
 - Do not weaken resume/retry behavior without replacement.
 - Never add destructive git/file commands to docs or scripts.
 
+## AI Usage
+
+- AI tooling (Claude/Codex) may be used to draft code or docs.
+- Human maintainer review is required before merge or release.
+- Agent-generated changes must pass the same tests and safety checks.
+
 ## Agent Operating Notes
 
 - Make minimal diffs and avoid unrelated refactors.
