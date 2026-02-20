@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from iphoto.models import (
+    MomentGroup,
     SessionState,
     VideoInfo,
     filter_ambiguous_filenames,
@@ -206,3 +207,112 @@ class TestVideoInfoProperties:
     def test_size_formatted(self):
         video = _make_video(size_bytes=2_147_483_648)
         assert video.size_formatted == "2.00 GB"
+
+
+# --- VideoInfo ML field defaults ---
+
+
+class TestVideoInfoMLFields:
+    def test_default_ml_fields(self):
+        video = _make_video()
+        assert video.labels == []
+        assert video.persons == []
+        assert video.face_count == 0
+        assert video.aesthetic_score is None
+        assert video.ai_description is None
+        assert video.relevance_score is None
+
+    def test_ml_fields_roundtrip(self):
+        video = _make_video(
+            labels=["outdoor", "beach"],
+            persons=["Emma"],
+            face_count=1,
+            aesthetic_score=0.85,
+            ai_description="Kids playing at the beach",
+            relevance_score=0.92,
+        )
+        d = video_to_dict(video)
+        restored = video_from_dict(d)
+        assert restored.labels == ["outdoor", "beach"]
+        assert restored.persons == ["Emma"]
+        assert restored.face_count == 1
+        assert restored.aesthetic_score == 0.85
+        assert restored.ai_description == "Kids playing at the beach"
+        assert restored.relevance_score == 0.92
+
+    def test_backwards_compat_missing_ml_fields(self):
+        """video_from_dict must tolerate dicts without ML fields (old manifests)."""
+        old_dict = {
+            "uuid": "test-uuid-1",
+            "filename": "ABC123.mov",
+            "original_filename": "IMG_0001.MOV",
+            "date_created": "2024-06-15T14:30:00+00:00",
+            "date_modified": "2024-06-15T14:30:00+00:00",
+            "size_bytes": 1_073_741_824,
+            "duration_seconds": 120.5,
+            "width": 1920,
+            "height": 1080,
+        }
+        video = video_from_dict(old_dict)
+        assert video.labels == []
+        assert video.persons == []
+        assert video.face_count == 0
+        assert video.aesthetic_score is None
+
+
+# --- MomentGroup quality methods ---
+
+
+def _make_moment_with_scores(scores: list[float | None]) -> MomentGroup:
+    """Create a MomentGroup with videos having given aesthetic scores."""
+    videos = []
+    for i, score in enumerate(scores):
+        v = _make_video(
+            uuid=f"uuid-{i}",
+            filename=f"video{i}.mov",
+            original_filename=f"IMG_{i:04d}.MOV",
+            size_bytes=(i + 1) * 100_000_000,
+            aesthetic_score=score,
+        )
+        videos.append(v)
+    return MomentGroup(name="Test Moment", videos=videos)
+
+
+class TestMomentGroupQuality:
+    def test_avg_aesthetic_score_all_scored(self):
+        moment = _make_moment_with_scores([0.4, 0.6, 0.8])
+        avg = moment.avg_aesthetic_score
+        assert avg is not None
+        assert abs(avg - 0.6) < 0.001
+
+    def test_avg_aesthetic_score_no_scores(self):
+        moment = _make_moment_with_scores([None, None])
+        assert moment.avg_aesthetic_score is None
+
+    def test_avg_aesthetic_score_mixed(self):
+        moment = _make_moment_with_scores([0.9, None, 0.3])
+        avg = moment.avg_aesthetic_score
+        assert avg is not None
+        assert abs(avg - 0.6) < 0.001
+
+    def test_quality_ranked_candidates_returns_lowest(self):
+        # Scores: 0.9, 0.7, 0.5, 0.3 — keep top 2, archive bottom 2
+        moment = _make_moment_with_scores([0.9, 0.7, 0.5, 0.3])
+        candidates = moment.quality_ranked_candidates(keep_top_n=2)
+        assert len(candidates) == 2
+        candidate_scores = [v.aesthetic_score for v in candidates]
+        assert 0.5 in candidate_scores
+        assert 0.3 in candidate_scores
+
+    def test_quality_ranked_candidates_keep_more_than_available(self):
+        moment = _make_moment_with_scores([0.8, 0.5])
+        candidates = moment.quality_ranked_candidates(keep_top_n=5)
+        assert candidates == []
+
+    def test_quality_ranked_candidates_none_scores_treated_as_lowest(self):
+        moment = _make_moment_with_scores([0.9, None, 0.5])
+        candidates = moment.quality_ranked_candidates(keep_top_n=1)
+        # Should keep the 0.9 score; archive 0.5 and None
+        assert len(candidates) == 2
+        unscored = [v for v in candidates if v.aesthetic_score is None]
+        assert len(unscored) == 1

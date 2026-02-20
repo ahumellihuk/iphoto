@@ -26,6 +26,13 @@ class VideoInfo:
     moment_name: str = ""
     moment_pk: int | None = None  # Unique moment identifier in Photos database
     is_local: bool = True  # False if video is in iCloud but not downloaded locally
+    # ML-enriched metadata (populated from osxphotos / intelligence pipeline)
+    labels: list[str] = field(default_factory=list)  # Apple-detected scene/object labels
+    persons: list[str] = field(default_factory=list)  # Detected person names
+    face_count: int = 0
+    aesthetic_score: float | None = None  # Apple quality score 0.0-1.0
+    ai_description: str | None = None  # VLM-generated description
+    relevance_score: float | None = None  # Cosine similarity to active query (0.0-1.0)
 
     @property
     def size_mb(self) -> float:
@@ -134,6 +141,25 @@ class MomentGroup:
     def space_to_reclaim(self) -> float:
         """Space in GB that would be freed by archiving videos above threshold."""
         return sum(v.size_bytes for v in self.videos_above_threshold()) / (1024**3)
+
+    @property
+    def avg_aesthetic_score(self) -> float | None:
+        """Average Apple aesthetic score across all videos in this moment (0.0-1.0)."""
+        scores = [v.aesthetic_score for v in self.videos if v.aesthetic_score is not None]
+        return sum(scores) / len(scores) if scores else None
+
+    def quality_ranked_candidates(self, keep_top_n: int = 3) -> list[VideoInfo]:
+        """Return lowest-quality videos as archival candidates.
+
+        Sorts by aesthetic_score descending, then returns everything after the
+        top keep_top_n videos. Videos with no score sort to the end (treated as lowest quality).
+        """
+        sorted_by_quality = sorted(
+            self.videos,
+            key=lambda v: v.aesthetic_score if v.aesthetic_score is not None else -1.0,
+            reverse=True,
+        )
+        return sorted_by_quality[keep_top_n:]
 
     def calculate_smart_threshold(self) -> float:
         """Calculate optimal threshold for this moment's video distribution.

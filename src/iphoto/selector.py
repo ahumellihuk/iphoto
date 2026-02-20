@@ -17,6 +17,58 @@ VIDEOS_PER_PAGE = 20
 MOMENTS_PER_PAGE = 10
 
 
+def quality_stars(score: float | None) -> str:
+    """Convert a 0.0-1.0 aesthetic score to a star rating string."""
+    if score is None:
+        return ""
+    if score >= 0.7:
+        return "★★★"
+    if score >= 0.4:
+        return "★★"
+    return "★"
+
+
+def filter_moments_by_query(moments: list[MomentGroup], query: str) -> list[MomentGroup]:
+    """Filter and rank moments by keyword query.
+
+    Builds a combined text description per moment from video labels, persons,
+    place names, moment names, and AI descriptions. Counts token matches and
+    sorts descending. Returns all moments if none match (no filtering effect).
+    Also sets video.relevance_score (0.0-1.0) on each video in matched moments.
+    """
+    tokens = [t for t in query.lower().split() if len(t) > 1]
+    if not tokens:
+        return moments
+
+    scored: list[tuple[MomentGroup, int]] = []
+    for moment in moments:
+        combined_parts = [moment.name.lower()]
+        for v in moment.videos:
+            if v.place_name:
+                combined_parts.append(v.place_name.lower())
+            combined_parts.extend(label.lower() for label in v.labels)
+            combined_parts.extend(p.lower() for p in v.persons)
+            if v.ai_description:
+                combined_parts.append(v.ai_description.lower())
+        combined_text = " ".join(combined_parts)
+        match_count = sum(1 for token in tokens if token in combined_text)
+        scored.append((moment, match_count))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    matched = [(m, c) for m, c in scored if c > 0]
+    if not matched:
+        return moments
+
+    max_count = matched[0][1]
+    for moment, count in matched:
+        rel = count / max_count if max_count else 0.0
+        for video in moment.videos:
+            video.relevance_score = rel
+
+    return [m for m, _ in matched]
+
+
 def format_total_size(videos: list[VideoInfo]) -> str:
     """Format total size of videos."""
     return format_bytes(sum(v.size_bytes for v in videos))
@@ -188,10 +240,17 @@ def display_videos(
     end = min(start + VIDEOS_PER_PAGE, len(videos))
     page_videos = videos[start:end]
 
+    show_quality = any(v.aesthetic_score is not None for v in page_videos)
+    show_relevance = any(v.relevance_score is not None for v in page_videos)
+
     table = Table(title=f"Videos {start + 1}-{end} of {len(videos)} (Total: {format_total_size(videos)})")
 
     if show_index:
         table.add_column("#", style="dim", width=4)
+    if show_relevance:
+        table.add_column("Match", style="magenta", width=6)
+    if show_quality:
+        table.add_column("Q", style="yellow", width=4)
     table.add_column("Date", style="cyan", width=10)
     table.add_column("Size", style="green", width=8)
     table.add_column("Len", width=8)  # Duration/Length
@@ -199,15 +258,23 @@ def display_videos(
     table.add_column("Filename", style="dim")
 
     for i, video in enumerate(page_videos):
-        idx = str(start + i + 1) if show_index else ""
-        table.add_row(
-            idx,
-            video.date_created.strftime("%Y-%m-%d"),
-            video.size_formatted,
-            video.duration_formatted,
-            video.moment_name[:20] if video.moment_name else "-",
-            video.original_filename,
+        row: list[str] = []
+        if show_index:
+            row.append(str(start + i + 1))
+        if show_relevance:
+            row.append(f"{video.relevance_score * 100:.0f}%" if video.relevance_score is not None else "")
+        if show_quality:
+            row.append(quality_stars(video.aesthetic_score))
+        row.extend(
+            [
+                video.date_created.strftime("%Y-%m-%d"),
+                video.size_formatted,
+                video.duration_formatted,
+                video.moment_name[:20] if video.moment_name else "-",
+                video.original_filename,
+            ]
         )
+        table.add_row(*row)
 
     console.print(table)
 
@@ -231,29 +298,44 @@ def display_moments(
         f"({total_videos} videos, {format_total_size([v for m in moments for v in m.videos])})"
     )
 
+    show_quality = any(m.avg_aesthetic_score is not None for m in page_moments)
+    show_relevance = any(any(v.relevance_score is not None for v in m.videos) for m in page_moments)
+
     table.add_column("#", style="dim", width=4)
+    if show_relevance:
+        table.add_column("Match", style="magenta", width=6)
     table.add_column("Moment Name", style="cyan", width=28)
     table.add_column("Videos", style="yellow", width=8)
     table.add_column("Total Size", style="dim", width=11)
     table.add_column("To Reclaim", style="green", width=11)
     table.add_column("Smart Threshold", style="magenta", width=15)
+    if show_quality:
+        table.add_column("Quality", style="yellow", width=8)
     table.add_column("✓", width=2)
 
     for i, moment in enumerate(page_moments):
         idx = str(start + i + 1)
         selected_mark = "✓" if moment.key in selected_moments else ""
-
         threshold_display = format_threshold(moment.smart_threshold_mb, moment.threshold_mb)
 
-        table.add_row(
-            idx,
-            moment.name[:28],
-            str(moment.video_count),
-            moment.total_size_formatted,
-            f"{moment.space_to_reclaim:.2f} GB",
-            threshold_display,
-            selected_mark,
+        row: list[str] = [idx]
+        if show_relevance:
+            scores = [v.relevance_score for v in moment.videos if v.relevance_score is not None]
+            rel_pct = f"{max(scores) * 100:.0f}%" if scores else ""
+            row.append(rel_pct)
+        row.extend(
+            [
+                moment.name[:28],
+                str(moment.video_count),
+                moment.total_size_formatted,
+                f"{moment.space_to_reclaim:.2f} GB",
+                threshold_display,
+            ]
         )
+        if show_quality:
+            row.append(quality_stars(moment.avg_aesthetic_score))
+        row.append(selected_mark)
+        table.add_row(*row)
 
     console.print(table)
 

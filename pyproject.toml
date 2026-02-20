@@ -25,6 +25,16 @@ dependencies = [
     "rich>=13.0.0",
 ]
 
+[project.optional-dependencies]
+# On-device ML features: NL semantic search + VLM video analysis (macOS 26+, Apple Silicon)
+# Install with: uv sync --extra intelligence
+intelligence = [
+    "mlx>=0.22.0",
+    "mlx-embeddings>=0.0.5",
+    "mlx-vlm>=0.1.12",
+    "chromadb>=0.6.0",
+]
+
 [project.scripts]
 iphoto = "iphoto.cli:app"
 

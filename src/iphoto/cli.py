@@ -16,13 +16,14 @@ from .config import (
     DEFAULT_EXPORT_TIMEOUT,
     DEFAULT_STAGING,
     LAST_DESTINATION_FILE,
+    ML_DB_PATH,
     SESSION_FILE,
     STAGING_SAFETY_MARGIN,
 )
 from .deleter import delete_from_photos
 from .exporter import calculate_batch_size, compute_sha256, export_videos
 from .manifest import append_manifest_entries, build_manifest_entry, load_manifest
-from .models import BatchProgress, SessionState, VideoInfo, format_bytes
+from .models import BatchProgress, MomentGroup, SessionState, VideoInfo, format_bytes
 from .mover import check_external_mounted, cleanup_staging, move_to_archive
 from .scanner import group_by_moment, rank_videos, scan_videos
 from .selector import (
@@ -33,6 +34,7 @@ from .selector import (
     format_total_size,
     interactive_select,
     interactive_select_moments,
+    quality_stars,
 )
 
 app = typer.Typer(
@@ -98,6 +100,8 @@ def scan(
     limit: int = typer.Option(50, "--limit", "-n", help="Number of videos to display"),
     group_by: str = typer.Option("flat", "--group-by", help="Grouping: flat or moment"),
     library: str | None = typer.Option(None, "--library", "-l", help="Path to Photos library"),
+    query: str | None = typer.Option(None, "--query", "-q", help="Filter/rank by keyword or semantic search"),
+    analyze: bool = typer.Option(False, "--analyze", help="Index videos with ML (requires [intelligence] extras)"),
 ) -> None:
     """Scan Photos library and display archivable videos."""
     console.print("[bold]Scanning Photos library for videos...[/bold]\n")
@@ -117,18 +121,135 @@ def scan(
     if icloud_count:
         console.print(f"[cyan]{icloud_count} videos in iCloud (will be downloaded during export)[/cyan]\n")
 
+    if analyze:
+        _run_ml_analysis(videos, use_vlm=True)
+
     if group_by == "moment":
         moments = group_by_moment(videos)
-        console.print(f"[bold]Found {len(moments)} moments:[/bold]\n")
+        if query:
+            ranked = _semantic_query(videos, query)
+            matched_uuids = {v.uuid for v in ranked}
+            moments = sorted(
+                [m for m in moments if any(v.uuid in matched_uuids for v in m.videos)],
+                key=lambda m: max((v.relevance_score or 0.0) for v in m.videos if v.uuid in matched_uuids),
+                reverse=True,
+            )
+            console.print(f"[cyan]Showing {len(moments)} moments matching [bold]{query!r}[/bold][/cyan]\n")
+        else:
+            console.print(f"[bold]Found {len(moments)} moments:[/bold]\n")
         display_moments(moments[:limit])
     else:
         videos = rank_videos(videos, sort_by=sort_by)
+        if query:
+            videos = _semantic_query(videos, query)
+            console.print(f"[cyan]Showing {len(videos)} videos matching [bold]{query!r}[/bold][/cyan]\n")
         display_summary(videos)
-
         console.print(f"\n[bold]Top {min(limit, len(videos))} videos:[/bold]")
         display_videos(videos[:limit])
 
     console.print("\n[dim]Use 'iphoto archive' to start archiving.[/dim]")
+
+
+def _run_ml_analysis(videos: list[VideoInfo], use_vlm: bool = False) -> None:
+    """Index unanalyzed videos into the ML vector store.
+
+    Requires [intelligence] extras. Shows a Rich progress bar. Skips already-
+    indexed videos so it is safe to call on every run — only new videos are
+    processed. Sets video.ai_description and video.relevance_score in-place.
+    """
+    from .intelligence import MLIndex, intelligence_available
+
+    if not intelligence_available():
+        console.print(
+            "[yellow]Intelligence extras not installed.[/yellow] "
+            "Run [cyan]uv sync --extra intelligence[/cyan] to enable semantic search.\n"
+        )
+        return
+
+    from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
+
+    from .thumbnails import extract_thumbnail
+
+    index = MLIndex(ML_DB_PATH)
+    unindexed = [v for v in videos if not index.is_indexed(v.uuid)]
+
+    if not unindexed:
+        console.print("[dim]ML index up to date.[/dim]")
+        index.apply_ai_descriptions(videos)
+        return
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task(
+            f"[cyan]Analysing {len(unindexed)} videos...[/cyan]",
+            total=len(unindexed),
+        )
+        for video in unindexed:
+            thumb: Path | None = None
+            if use_vlm and video.is_local and video.filename:
+                # Prefer the staged/local path if available
+                import osxphotos
+
+                try:
+                    db = osxphotos.PhotosDB()
+                    photo = db.get_photo(video.uuid)
+                    if photo and photo.path:
+                        thumb = extract_thumbnail(Path(photo.path))
+                except Exception:
+                    pass
+            index.index_video(video, thumb)
+            if thumb and thumb.exists():
+                thumb.unlink(missing_ok=True)
+            progress.advance(task)
+
+    index.apply_ai_descriptions(videos)
+    console.print(f"[green]Indexed {len(unindexed)} videos.[/green]\n")
+
+
+def _semantic_query(videos: list[VideoInfo], query: str) -> list[VideoInfo]:
+    """Rank videos by semantic similarity and set relevance_score in-place.
+
+    Falls back to keyword matching if intelligence extras aren't installed.
+    """
+    from .intelligence import MLIndex, intelligence_available
+    from .scanner import group_by_moment
+    from .selector import filter_moments_by_query
+
+    if not intelligence_available():
+        # Keyword fallback: use existing filter function and return flat video list
+        moments = filter_moments_by_query(group_by_moment(videos), query)
+        return [v for m in moments for v in m.videos]
+
+    index = MLIndex(ML_DB_PATH)
+    ranked = index.query(query, videos)
+    for video, score in ranked:
+        video.relevance_score = score
+    return [v for v, _ in ranked]
+
+
+def _show_quality_suggestions(moments: list[MomentGroup], keep_top_n: int = 3) -> None:
+    """Print quality-based archival suggestions before the interactive picker."""
+    has_scores = any(m.avg_aesthetic_score is not None for m in moments)
+    if not has_scores:
+        console.print("[dim]Quality scores not available — run 'iphoto archive --analyze' for ML analysis.[/dim]\n")
+        return
+
+    console.print("[bold]Quality-based archival suggestions[/bold] (keep top 3 by quality per moment):")
+    for moment in moments[:10]:  # Cap at 10 moments to avoid wall of text
+        candidates = moment.quality_ranked_candidates(keep_top_n)
+        if not candidates:
+            continue
+        avg = moment.avg_aesthetic_score
+        console.print(
+            f"  [cyan]{moment.name[:30]}[/cyan]  "
+            f"archive {len(candidates)}/{moment.video_count}  "
+            f"avg quality {quality_stars(avg)}"
+        )
+    console.print()
 
 
 def _resume_or_create_session(
@@ -144,6 +265,9 @@ def _resume_or_create_session(
     no_delete: bool,
     allow_ambiguous: bool,
     library: str | None,
+    query: str | None = None,
+    smart_threshold: bool = False,
+    analyze: bool = False,
 ) -> tuple[SessionState, list[VideoInfo]] | None:
     """Resume existing session or create new one via scan+select."""
     existing_session = load_session()
@@ -191,10 +315,25 @@ def _resume_or_create_session(
     all_videos = rank_videos(all_videos, sort_by="size")
     display_summary(all_videos)
 
+    if analyze:
+        _run_ml_analysis(all_videos, use_vlm=True)
+
     console.print("\n[bold]Step 2:[/bold] Select videos to archive...\n")
     if use_moments and all_videos:
         moments = group_by_moment(all_videos)
-        console.print(f"[cyan]Grouped into {len(moments)} moments[/cyan]\n")
+        if query:
+            ranked = _semantic_query(all_videos, query)
+            matched_uuids = {v.uuid for v in ranked}
+            moments = sorted(
+                [m for m in moments if any(v.uuid in matched_uuids for v in m.videos)],
+                key=lambda m: max((v.relevance_score or 0.0) for v in m.videos if v.uuid in matched_uuids),
+                reverse=True,
+            )
+            console.print(f"[cyan]Filtered to {len(moments)} moments matching [bold]{query!r}[/bold][/cyan]\n")
+        else:
+            console.print(f"[cyan]Grouped into {len(moments)} moments[/cyan]\n")
+        if smart_threshold:
+            _show_quality_suggestions(moments)
         selected = interactive_select_moments(moments, external_path=external, threshold_mb=threshold_mb)
     else:
         selected = interactive_select(all_videos, max_size_gb=None)
@@ -357,6 +496,9 @@ def archive(
     continuous: bool = typer.Option(
         True, "--continuous/--interactive", help="Process all batches without prompting (default: True)"
     ),
+    query: str | None = typer.Option(None, "--query", "-q", help="Filter/rank by keyword or semantic search"),
+    smart_threshold: bool = typer.Option(False, "--smart-threshold", help="Show quality-based archival suggestions"),
+    analyze: bool = typer.Option(False, "--analyze", help="Index videos with ML (requires [intelligence] extras)"),
 ) -> None:
     """Batch-based archive workflow: auto-size batches, export parallel, archive, delete."""
     console.print("[bold]iphoto - Video Archive Tool[/bold]\n")
@@ -380,6 +522,9 @@ def archive(
         no_delete=no_delete,
         allow_ambiguous=allow_ambiguous,
         library=library,
+        query=query,
+        smart_threshold=smart_threshold,
+        analyze=analyze,
     )
     if not result:
         return
@@ -755,6 +900,9 @@ def resume() -> None:
         allow_ambiguous=session.allow_ambiguous,
         library=session.library_path,
         continuous=True,
+        query=None,
+        smart_threshold=False,
+        analyze=False,
     )
 
 

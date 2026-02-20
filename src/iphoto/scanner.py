@@ -163,6 +163,10 @@ def scan_videos(
                 moment_name=moment_name,
                 moment_pk=moment_pk,
                 is_local=is_local,
+                labels=list(photo.labels or []),
+                persons=list(photo.persons or []),
+                face_count=len(photo.face_info) if photo.face_info else 0,
+                aesthetic_score=photo.score.overall if photo.score else None,
             )
             videos.append(video)
 
