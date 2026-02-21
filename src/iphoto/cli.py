@@ -178,6 +178,17 @@ def _run_ml_analysis(videos: list[VideoInfo], use_vlm: bool = False) -> None:
         index.apply_ai_descriptions(videos)
         return
 
+    # Open PhotosDB once — parsing the Photos SQLite DB is expensive; avoid
+    # opening a new connection for every video in the loop.
+    photos_db = None
+    if use_vlm:
+        import contextlib
+
+        import osxphotos
+
+        with contextlib.suppress(Exception):
+            photos_db = osxphotos.PhotosDB()
+
     with Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
@@ -190,13 +201,9 @@ def _run_ml_analysis(videos: list[VideoInfo], use_vlm: bool = False) -> None:
         )
         for video in unindexed:
             thumb: Path | None = None
-            if use_vlm and video.is_local and video.filename:
-                # Prefer the staged/local path if available
-                import osxphotos
-
+            if use_vlm and video.is_local and video.filename and photos_db is not None:
                 try:
-                    db = osxphotos.PhotosDB()
-                    photo = db.get_photo(video.uuid)
+                    photo = photos_db.get_photo(video.uuid)
                     if photo and photo.path:
                         thumb = extract_thumbnail(Path(photo.path))
                 except Exception:

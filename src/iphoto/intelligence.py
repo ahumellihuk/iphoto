@@ -179,11 +179,13 @@ class MLIndex:
         query_embedding = self._embed([text])[0]
         uuid_set = {v.uuid for v in videos}
 
-        # Query up to all indexed videos for the given UUIDs
+        # Query ALL indexed docs so the Python-side UUID filter (below) operates on
+        # the complete result set. Using len(videos) as the cap would miss current-
+        # library videos when the collection contains more docs than the active scan.
+        total = self._collection.count() or 1
         results = self._collection.query(
             query_embeddings=[query_embedding],
-            n_results=min(len(videos), self._collection.count() or 1),
-            where=None,
+            n_results=total,
             include=["distances", "metadatas"],
         )
 
