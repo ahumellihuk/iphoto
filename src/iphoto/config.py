@@ -12,3 +12,5 @@ ICLOUD_MIN_TIMEOUT = 3600
 STAGING_SAFETY_MARGIN = 0.70
 
 DELETE_ALBUM_NAME = "iphoto - Ready to Delete"
+
+ML_DB_PATH = Path.home() / ".iphoto_ml_db"

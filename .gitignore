@@ -1,3 +1,4 @@
+.worktrees/
 .venv/
 .idea/
 __pycache__/
