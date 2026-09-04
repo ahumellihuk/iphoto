@@ -1,5 +1,7 @@
 # Spec: PhotoKit spike (2026-09-04)
 
+UPDATE 2026-09-04: two implementation facts changed the harness, not the measurements. (1) `PHAssetResourceManager.writeData` returns no request handle and cannot be cancelled, so downloads use `requestData` with a file sink, which is what osxphotos does; stall cancellation needs it. (2) App Sandbox hides every path outside the container, so `sample.json` and `results/` live inside the user-selected scratch folder (`spike/scratch/`), the one location the bookmark grants. The smoke run confirmed authorization, enumeration, public `dataSize`, and locality all work under sandbox on macOS 27.0.
+
 Status: approved for stage A on 2026-09-04. Immutable; corrections go in a dated `UPDATE:` header at the top.
 
 ## Why

@@ -19,3 +19,9 @@ build/
 /tmp/*photo*
 /check_*.py
 /debug_*.py
+
+# PhotoKit spike outputs
+/spike/results/
+/spike/sample*.json
+/spike/PhotoKitSpike/build/
+/spike/scratch/
