@@ -1,6 +1,8 @@
 # PhotoKit spike results, stage A (2026-09-04)
 
-Spec: [2026-09-04-photokit-spike.md](../specs/2026-09-04-photokit-spike.md). Raw data: `spike/scratch/results/A1-2026-09-04T122929Z.jsonl` and `A1size-*.jsonl` (gitignored, on this Mac).
+**Stage A verdict: PASS.** Enumeration, byte-exact download, stall recovery, and throughput all cleared their gates across A1, A2, and A3. The size gate failed only for non-camera `.mp4` imports. Stage B (delete, re-import, bookmark survival) has not run.
+
+Spec: [2026-09-04-photokit-spike.md](../specs/2026-09-04-photokit-spike.md). Raw data: `spike/scratch/results/A1-*.jsonl`, `A1size-*.jsonl`, `A2-*.jsonl`, `A3c2-*.jsonl`, `A3c4-*.jsonl` (gitignored, on this Mac).
 
 ## Environment as run
 
@@ -35,13 +37,44 @@ The two hard gates that matter for the product direction, enumeration and byte-e
 
 6. **Permission attribution.** Launched from a shell, macOS auto-denied Photos access without a prompt. Launched through LaunchServices it prompted and granted. The product will always launch normally, but any CLI or test harness must use `open`.
 
-## What A1 does not show
+## A2: Photos.app quit
 
-- Behavior with Photos.app quit (A2) and under concurrency (A3): not yet run.
-- Cold-download behavior on more than six files over 1 GB, since the library ran out of them today.
+Fresh sample (seed 7, A1 set excluded): 15 small, 5 medium, 5 "local" controls, run with `--only-cloud` so the probe decides what is a cold download. Photos.app was quit before the run and stayed quit (`photos_running=false` recorded).
+
+| Measure | Result |
+|---|---|
+| Cold downloads attempted | 11 (5 medium, 1 small, 5 controls that were iCloud-only despite the database flag) |
+| Byte-exact on first attempt | 11 of 11 |
+| Stalls, errors | none |
+| Throughput, medium band | 45 to 54 MB/s, median 46 |
+| Skipped because the probe found the original local | 14 of 15 small videos |
+
+Findings:
+
+7. **Photos.app does not need to be running.** Downloads went through the system daemons at the same speed as A1 or slightly faster. This removes AppleScript's most awkward runtime dependency.
+8. **Optimize Mac Storage keeps small originals local.** Fourteen of fifteen small iCloud videos were already local under the database's "not local" flag. The database flag is wrong in both directions; only the PhotoKit probe is trustworthy.
+
+## A3: concurrency 2 and 4
+
+Five medium videos each, Photos.app running.
+
+| Concurrency | Files | Total | Wall time | Aggregate | Per-stream |
+|---|---|---|---|---|---|
+| 1 (A2 medium, reference) | 5 | 3.6 GB | about 76 s | about 47 MB/s | 45 to 54 MB/s |
+| 2 | 5 | 3.0 GB | 57.7 s | about 53 MB/s | 25 to 43 MB/s |
+| 4 | 5 | 2.7 GB | 44.7 s | about 61 MB/s | 14 to 26 MB/s |
+
+All 10 byte-exact on the first attempt, no stalls, no errors.
+
+Finding 9. **Concurrency helps only modestly.** Aggregate throughput rises from about 47 to about 61 MB/s between one and four streams, while per-stream speed falls proportionally, which points at a shared network ceiling near 60 MB/s on this connection. Two concurrent downloads is the sensible product default; four adds little and multiplies partial files on failure.
+
+## What stage A does not show
+
+- Cold-download behavior on more than six files over 1 GB, since the library ran out of them today. The largest cold file measured was 1.7 GB.
 - Whether the cached originals get evicted, and how quickly.
 - Anything about deletion, re-import, or bookmark survival (stage B).
+- Behavior across sleep, or on macOS 26.
 
-## Next
+## Stage A summary for the north star
 
-A2 and A3 need a fresh sample because everything in A1 is now cached. Sample selection runs from a terminal with Full Disk Access, excluding the A1 set, and the harness `--only-cloud` flag skips any video whose original the probe finds local, so a stale database flag cannot contaminate the download measurements again.
+PhotoKit from inside App Sandbox can be the product's only download engine on macOS 27. It enumerated every iCloud-only video, downloaded every one byte-exact, matched AppleScript hashes on all paired files, recovered its only transient error on the first retry, and did so with Photos.app closed and at about 0.75 to 1.0x AppleScript's speed. The costs are known: sizes are unavailable for non-camera imports, downloads cache the original in the library, and the product must carry its own locality probe because no flag exists. Stage B remains the gate for deletion and restore.
