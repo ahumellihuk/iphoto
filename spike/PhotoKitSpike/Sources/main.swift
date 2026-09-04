@@ -8,7 +8,7 @@ import Photos
 ///   PhotoKitSpike.app/Contents/MacOS/PhotoKitSpike --variant A1 \
 ///       [--sample sample.json] [--out results] \
 ///       [--subset all|paired|icloud|small|medium|large|local] [--concurrency N]
-///       [--skip-download] [--keep-files] [--pick-scratch] [--stall 180] [--cap 3600]
+///       [--skip-download] [--only-cloud] [--keep-files] [--pick-scratch] [--stall 180] [--cap 3600]
 ///
 /// The sandbox hides every path outside the container, so --sample and --out
 /// are resolved relative to the user-selected scratch folder, the one folder
@@ -36,6 +36,7 @@ struct Args {
             case "--attempts": config.attempts = Int(it.next() ?? "3") ?? 3
             case "--skip-download": config.skipDownload = true
             case "--keep-files": config.keepFiles = true
+            case "--only-cloud": config.onlyCloud = true
             case "--pick-scratch": pickScratch = true
             default: fputs("unknown argument \(a)\n", stderr); exit(2)
             }

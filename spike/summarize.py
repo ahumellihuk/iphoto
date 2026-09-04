@@ -57,7 +57,10 @@ def main() -> int:
     print(f"public size == db (iCloud-only)    {pct(len(size_ok), len(icloud))}   {'PASS' if len(icloud) and len(size_ok) / len(icloud) >= 0.95 else 'FAIL'}")
 
     loc_ok = ok_set("locality", videos)
-    print(f"locality agrees with db            {pct(len(loc_ok), len(videos))}   {'PASS' if len(videos) and len(loc_ok) / len(videos) >= 0.95 else 'FAIL'}")
+    print(f"locality agrees with db            {pct(len(loc_ok), len(videos))}   {'PASS' if len(videos) and len(loc_ok) / len(videos) >= 0.95 else 'FAIL'}  (db flag = MAX over all resources; see results record)")
+    skipped = [r for r in by_step["download"] if (r.get("note") or "").startswith("skipped")]
+    if skipped:
+        print(f"skipped as already local           {len(skipped)}")
 
     verified = ok_set("verify", icloud)
     print(f"byte-exact download (iCloud-only)  {pct(len(verified), len(icloud))}   {'PASS' if len(icloud) and len(verified) / len(icloud) >= 0.95 else 'FAIL'}")
@@ -66,8 +69,8 @@ def main() -> int:
     unrecovered = stalled - ok_set("download", videos)
     print(f"stall recovery                     stalled={len(stalled)} unrecovered={len(unrecovered)}   {'PASS' if not unrecovered else 'FAIL'}")
 
-    paired_hash = [r for r in by_step["verify"] if "hash_ok=True" in (r.get("note") or "")]
-    paired_fail = [r for r in by_step["verify"] if "hash_ok=False" in (r.get("note") or "")]
+    paired_hash = [r for r in by_step["verify"] if "hash_ok=true" in (r.get("note") or "")]
+    paired_fail = [r for r in by_step["verify"] if "hash_ok=false" in (r.get("note") or "")]
     print(f"paired hashes identical            ok={len(paired_hash)} mismatch={len(paired_fail)}   {'PASS' if paired_hash and not paired_fail else ('n/a' if not paired_hash and not paired_fail else 'FAIL')}")
 
     speeds = [r["mbps"] for r in by_step["download"] if r["ok"] and r.get("mbps")]

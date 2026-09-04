@@ -9,6 +9,7 @@ struct StageAConfig {
     var backoff: [TimeInterval] = [5, 15, 45]
     var skipDownload = false
     var keepFiles = false
+    var onlyCloud = false        // skip download when the locality probe says the original is already local
 }
 
 /// Read-only measurements. Never modifies the library.
@@ -93,6 +94,10 @@ final class StageA {
                             note: "db_local=\(expectedLocal) observed_local=\(observedLocal)"))
 
         if config.skipDownload { return }
+        if config.onlyCloud && observedLocal {
+            writer.write(record(v, "download", ok: false, note: "skipped: original already local"))
+            return
+        }
 
         var success = false
         for attempt in 1...config.attempts {

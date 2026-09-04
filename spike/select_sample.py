@@ -5,7 +5,7 @@ so the sample lives there.
 
 Run from a terminal with Full Disk Access:
 
-    uv run python spike/select_sample.py [--seed 42] [--per-band 10] [--controls 5]
+    uv run python spike/select_sample.py [--seed 42] [--per-band 10] [--controls 5] [--exclude spike/scratch/sample.json] [--out ...]
 
 Bands (spec docs/specs/2026-09-04-photokit-spike.md): small (<200 MB), medium
 (200 MB to 1 GB), large (>1 GB, always including the largest video), plus local
@@ -36,9 +36,15 @@ def main() -> int:
     ap.add_argument("--controls", type=int, default=5)
     ap.add_argument("--library", default=None)
     ap.add_argument("--out", default=str(Path(__file__).parent / "scratch" / "sample.json"))
+    ap.add_argument("--exclude", action="append", default=[],
+                    help="sample.json file(s) whose videos must not be chosen again (their originals are now cached)")
     args = ap.parse_args()
 
-    videos = _scan_videos_sqlite(library_path=args.library)
+    excluded: set[str] = set()
+    for path in args.exclude:
+        excluded |= {v["uuid"] for v in json.loads(Path(path).read_text())["videos"]}
+
+    videos = [v for v in _scan_videos_sqlite(library_path=args.library) if v.uuid not in excluded]
     icloud = [v for v in videos if not v.is_local]
     local = [v for v in videos if v.is_local]
     bands = {
