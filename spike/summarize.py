@@ -36,7 +36,9 @@ def main() -> int:
         return 2
     rows = load(paths)
     videos = {r["uuid"] for r in rows if r["uuid"] != "-"}
-    icloud = {r["uuid"] for r in rows if r["uuid"] != "-" and r["band"] != "local"}
+    # Videos the probe found already local (--only-cloud) are not iCloud measurements.
+    skipped_local = {r["uuid"] for r in rows if r["step"] == "download" and (r.get("note") or "").startswith("skipped")}
+    icloud = {r["uuid"] for r in rows if r["uuid"] != "-" and r["band"] != "local"} - skipped_local
     by_step = collections.defaultdict(list)
     for r in rows:
         by_step[r["step"]].append(r)
@@ -58,9 +60,8 @@ def main() -> int:
 
     loc_ok = ok_set("locality", videos)
     print(f"locality agrees with db            {pct(len(loc_ok), len(videos))}   {'PASS' if len(videos) and len(loc_ok) / len(videos) >= 0.95 else 'FAIL'}  (db flag = MAX over all resources; see results record)")
-    skipped = [r for r in by_step["download"] if (r.get("note") or "").startswith("skipped")]
-    if skipped:
-        print(f"skipped as already local           {len(skipped)}")
+    if skipped_local:
+        print(f"skipped as already local           {len(skipped_local)} (excluded from iCloud-only denominators)")
 
     verified = ok_set("verify", icloud)
     print(f"byte-exact download (iCloud-only)  {pct(len(verified), len(icloud))}   {'PASS' if len(icloud) and len(verified) / len(icloud) >= 0.95 else 'FAIL'}")
