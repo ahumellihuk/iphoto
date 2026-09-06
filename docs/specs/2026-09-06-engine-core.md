@@ -1,6 +1,8 @@
 # Spec: Engine core (2026-09-06)
 
-Status: draft for review. Immutable once approved; corrections go in a dated `UPDATE:` line at the top.
+SUPERSEDED 2026-09-06 by [engine core v2](2026-09-06-engine-core-v2.md) after the red team ([consolidation](../research/redteam/2026-09-06-consolidated.md)). Kept as the dated record of the first design.
+
+Status: superseded. Immutable once approved; corrections go in a dated `UPDATE:` line at the top.
 
 Phase 1 of the [north star](../NORTH-STAR.md). Builds on the [PhotoKit spike](../archive/specs/2026-09-04-photokit-spike.md) and its [results](../research/2026-09-04-photokit-spike-results.md). Every section below is checked against the seven invariants; the invariant numbers are cited where a rule comes from one.
 
