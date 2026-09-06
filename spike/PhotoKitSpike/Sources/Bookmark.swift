@@ -38,15 +38,24 @@ enum ScratchFolder {
 
     /// Show an open panel for a directory. Used by stage B for the archive volume.
     @MainActor
-    static func pick(message: String) -> URL? {
+    static func pick(message: String, startAt: URL? = nil, requirePrefix: String? = nil) -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Use this folder"
         panel.message = message
+        if let s = startAt { panel.directoryURL = s }
         NSApp.activate(ignoringOtherApps: true)
-        return panel.runModal() == .OK ? panel.url : nil
+        for _ in 0..<3 {
+            guard panel.runModal() == .OK, let url = panel.url else { return nil }
+            if let prefix = requirePrefix, !url.path.hasPrefix(prefix) {
+                panel.message = "That was \(url.path). Pick a mounted volume under \(prefix) (e.g. SpikeArchive in the sidebar)."
+                continue
+            }
+            return url
+        }
+        return nil
     }
 
     private static func store(_ url: URL) {

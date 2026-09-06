@@ -290,7 +290,8 @@ final class StageB {
             if url == nil { how = "resolve failed" }
         }
         if url == nil {
-            guard let picked = ScratchFolder.pick(message: "Choose the ARCHIVE volume for the bookmark test (the mounted disk image)") else {
+            guard let picked = ScratchFolder.pick(message: "Choose the ARCHIVE volume for the bookmark test (the mounted disk image)",
+                                                  startAt: URL(fileURLWithPath: "/Volumes/SpikeArchive"), requirePrefix: "/Volumes/") else {
                 writer.write(record(video("-", nil), "bookmark", ok: false, note: "no volume chosen")); return false
             }
             if let data = try? picked.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
