@@ -1,6 +1,13 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project will be documented in this file. One line per shipped change, newest first.
+
+## [Unreleased]
+
+- 2026-09-06 docs: north star, live state, coverage ledger, and docs discipline established (`docs/`, `AGENTS.md`).
+- 2026-09-06 spike: stage B passed; delete, restore, and bookmark survival proven under App Sandbox; shared-album assets identified as non-deletable.
+- 2026-09-04 spike: stage A passed; PhotoKit enumerates and downloads iCloud originals byte-exact under App Sandbox on macOS 27.
+- 2026-09-04 research: market, competition, Apple platform, demand, user voice, PhotoKit feasibility, and git-history lessons recorded under `docs/research/`.
 
 ## [0.1.0] - 2026-02-15
 

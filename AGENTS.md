@@ -4,7 +4,10 @@ Shared contributor and agent instructions for this repository.
 
 ## Scope
 
-This project is a macOS-only Python CLI that archives selected Apple Photos videos to external storage when local disk and iCloud storage are both constrained.
+This repository holds two things:
+
+- `src/iphoto`: a macOS-only Python CLI that archives selected Apple Photos videos to external storage. It is the frozen reference implementation: bug fixes only, no new features.
+- `docs/` and `spike/`: the north star, live state, research, specs, and the PhotoKit spike for the native macOS product that succeeds the CLI. Read `docs/NORTH-STAR.md` first, then `docs/STATE.md`.
 
 ## Repo Goals
 
@@ -30,6 +33,20 @@ uv run mypy src/iphoto/models.py
 uv run pytest tests/ -v
 ```
 
+## Docs Discipline
+
+The documentation is a system with one home per fact. These rules bind every session, human or agent.
+
+1. **One home per fact.** If a fact appears twice, one is a pointer. Duplication is the top cause of drift.
+2. **Status lives only in `docs/STATE.md` and `docs/COVERAGE.md`.** Never write "current status", "done", or percentages into a spec, README, or research doc.
+3. **Specs are immutable dated records** in `docs/specs/`. Correct one only with a dated `UPDATE:` line at the top. A new decision is a new dated spec. Shipped specs move to `docs/archive/specs/`.
+4. **Update in the same commit.** A slice is not done until its STATE `Now` line moves to `CHANGELOG.md`, its COVERAGE row flips, and STATE `Now` and `Next` are rewritten, all in the commit that ships the code.
+5. **Point, never re-copy.** Detail lives in specs and research; STATE and COVERAGE point at it.
+6. **The live ledger has one writer.** STATE, COVERAGE, and CHANGELOG are written by the execution channel alone. A parallel session or design channel writes only under `docs/specs/` or `docs/research/`; its outcomes enter the ledger through the next execution update.
+7. **Every change is checked against the invariants** in `docs/NORTH-STAR.md`. A change that would break one is out, or must show an explicit reviewed fence.
+
+Tier map: `docs/NORTH-STAR.md` (binding intent, invariants, phases) · `docs/STATE.md` (Now, Next, Gate, Decisions pending) · `docs/COVERAGE.md` (system × status × owner × invariant) · `CHANGELOG.md` (one line per shipped change) · `docs/specs/` and `docs/archive/specs/` (immutable design records) · `docs/plans/` (per-slice plans) · `docs/journal/` (per-session records) · `docs/research/` (dated evidence).
+
 ## Code Map
 
 - `src/iphoto/cli.py`: Typer entrypoints and session orchestration.
@@ -41,6 +58,7 @@ uv run pytest tests/ -v
 - `src/iphoto/deleter.py`: optional deletion from Photos.
 - `src/iphoto/manifest.py`: JSONL manifest I/O.
 - `src/iphoto/models.py`: core dataclasses and pure helpers.
+- `spike/`: sandboxed PhotoKit spike harness (Swift app bundle built by Makefile) plus Python sample and scoring scripts. Not product code; kept for re-measurement.
 
 ## Contribution Expectations
 

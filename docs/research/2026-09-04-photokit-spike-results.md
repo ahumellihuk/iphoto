@@ -2,7 +2,7 @@
 
 **Stage A verdict: PASS. Stage B verdict: PASS.** Enumeration, byte-exact download, stall recovery, and throughput cleared their gates across A1 to A3. Delete, restore, and bookmark survival cleared theirs in stage B on 2026-09-06. The size gate failed only for shared-album assets, which turned out to be the real explanation for the `.mp4` anomaly (finding 2 is superseded by finding 12).
 
-Spec: [2026-09-04-photokit-spike.md](../specs/2026-09-04-photokit-spike.md). Raw data: `spike/scratch/results/A1-*.jsonl`, `A1size-*.jsonl`, `A2-*.jsonl`, `A3c2-*.jsonl`, `A3c4-*.jsonl` (gitignored, on this Mac).
+Spec: [2026-09-04-photokit-spike.md](../archive/specs/2026-09-04-photokit-spike.md). Raw data: `spike/scratch/results/A1-*.jsonl`, `A1size-*.jsonl`, `A2-*.jsonl`, `A3c2-*.jsonl`, `A3c4-*.jsonl` (gitignored, on this Mac).
 
 ## Environment as run
 
