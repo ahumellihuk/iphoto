@@ -286,7 +286,16 @@ final class StageB {
         var stale = false
         var how = "resolved"
         if !forcePick, let data = UserDefaults.standard.data(forKey: key) {
-            url = try? URL(resolvingBookmarkData: data, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale)
+            // .withoutMounting: a bookmark to a disk image would otherwise mount it on resolve,
+            // which a product must never do silently; a physical drive that is unplugged fails here.
+            do {
+                url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &stale)
+            } catch {
+                let ns = error as NSError
+                writer.write(record(video("-", nil), "bookmark", ok: false, error: error,
+                                    note: "resolve failed stale=\(stale) domain=\(ns.domain) code=\(ns.code)"))
+                return false
+            }
             if url == nil { how = "resolve failed" }
         }
         if url == nil {
@@ -311,8 +320,10 @@ final class StageB {
             readOK = (try String(contentsOf: probe, encoding: .utf8)) == payload
         } catch { err = error }
         let reachable = (try? volume.checkResourceIsReachable()) ?? false
+        let rv = try? volume.resourceValues(forKeys: [.volumeUUIDStringKey, .volumeNameKey, .volumeIsRootFileSystemKey, .volumeTotalCapacityKey, .isVolumeKey])
+        let volumeNote = "volume_uuid=\(rv?.volumeUUIDString ?? "nil") volume_name=\(rv?.volumeName ?? "nil") is_root_fs=\(rv?.volumeIsRootFileSystem.map { "\($0)" } ?? "nil") is_volume=\(rv?.isVolume.map { "\($0)" } ?? "nil") capacity_mb=\((rv?.volumeTotalCapacity ?? 0) / 1_048_576)"
         writer.write(record(video("-", nil), "bookmark", ok: writeOK && readOK, error: err,
-                            note: "\(how) stale=\(stale) reachable=\(reachable) access_started=\(started) write=\(writeOK) read=\(readOK) path=\(volume.path)"))
+                            note: "\(how) stale=\(stale) reachable=\(reachable) access_started=\(started) write=\(writeOK) read=\(readOK) path=\(volume.path) \(volumeNote)"))
         if stale, let data = try? volume.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
             UserDefaults.standard.set(data, forKey: key)
         }
