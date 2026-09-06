@@ -4,35 +4,33 @@ The only home for current status. Rewritten continuously by the execution channe
 
 ## Now
 
-- Phase 1, Engine. Red team complete: five reports and a [consolidation](research/redteam/2026-09-06-consolidated.md). [Engine spec v2](specs/2026-09-06-engine-core-v2.md) drafted with the accepted fixes, awaiting review together with decisions D1 to D4. The slice 1 plan is rewritten once D1 and D4 are decided.
+- Phase 1, Engine, slice 1 against [spec v2](specs/2026-09-06-engine-core-v2.md): package skeleton, size estimation, full asset record, classifier with all exclusions, library environment with Shared Library probe, scanner, locality probe with timeout, harness `scan` and `environment`. Plan: [plans/2026-09-06-engine-slice-1.md](plans/2026-09-06-engine-slice-1.md) (rewritten after the [red team](research/redteam/2026-09-06-consolidated.md)).
 
 ## Next (ordered)
 
-1. Decide D1 (minimum macOS), D2 (Shared Library gating), D3 (north star wording and exit gates), D4 (edited videos excluded in phase 1).
-2. Rewrite [plans/2026-09-06-engine-slice-1.md](plans/2026-09-06-engine-slice-1.md) against spec v2 and the dry-run defects; execute slice 1.
-3. Engine slice 2: archive log, projection, layout, v1 adapter with a real fixture, harness adopt and verify.
-4. Engine slice 3: downloader, verifier, thumbnails, job store, batch planner, volume access, harness archive with resume.
-5. Engine slice 4: deleter. 6. Slice 5: restorer. 7. Slice 6: grouping on MapKit. 8. Slice 7: exit gate run.
-9. Python CLI maintenance: fix `is_local` (task chip open), then freeze.
-10. Phase 2 spec.
+1. Execute slice 1.
+2. Engine slice 2: archive log, projection, layout, v1 adapter with a real fixture, harness adopt and verify.
+3. Engine slice 3: downloader, verifier, thumbnails, job store, batch planner, volume access, harness archive with resume.
+4. Engine slice 4: deleter. 5. Slice 5: restorer. 6. Slice 6: grouping on MapKit. 7. Slice 7: exit gate run.
+8. Python CLI maintenance: fix `is_local` (task chip open), then freeze.
+9. Phase 2 spec.
 
 ## Gate
 
-- Phase 1 exit: engine proven end to end on this Mac's real library, including one archive-delete-restore round trip on a real user-library asset with two verified copies, as in the spike.
+- Phase 1 exit: the numeric gate in the north star phase table (fifty cold videos, sleep and unplug, zero re-downloads, ten deletes and restores, one adopted manifest verified, every exclusion reason exercised, zero untyped failures).
 
 ## Decisions pending
 
-- D1 Minimum macOS 27 (decided 2026-09-06) reopened by the red team: 27 excludes every Intel Mac and about half of active Macs in the launch quarter; a 26 fallback costs one slice. Recommendation: 26.
-- D2 iCloud Shared Library: PhotoKit cannot tell shared from personal. Recommendation: detect participation and warn before deletion.
-- D3 North star wording: honest 30-day Recently Deleted timeline; invariant 7 gating; sharper exit gates. Text in the consolidation.
-- D4 Edited videos excluded from phase 1 archiving. Recommendation: yes.
 - Final price point within $29 to $39 and the family tier.
 
 ## Decisions made
 
+- 2026-09-06 D1 Minimum macOS 26 with estimated sizes; exact sizes on 27. Reverses the earlier 27 decision after the red team.
+- 2026-09-06 D2 iCloud Shared Library: detect where possible, warn before any delete, treat "cannot tell" as warn.
+- 2026-09-06 D3 North star job sentence carries the 30-day Recently Deleted timeline; invariant 7 gains Shared Library gating and edit preservation; exit gates are numeric.
+- 2026-09-06 D4 Edited videos excluded from phase 1 archiving with a visible count.
+- 2026-09-06 Engine spec v2 approved.
 - 2026-09-06 Product name: Video Attic ([naming study](research/2026-09-06-naming.md)). Follow-ups: formal class 9 and 42 search, videoattic.app domain, early US application.
-- 2026-09-06 Engine spec approved.
-- 2026-09-06 Minimum macOS 27 (public `dataSize`, no private API).
 - 2026-09-06 Direct build ships the same PhotoKit engine, no AppleScript, no capability flags.
 
 ## Known risks carried forward

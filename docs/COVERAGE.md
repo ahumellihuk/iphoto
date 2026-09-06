@@ -9,7 +9,7 @@ Every system and surface, its status, its owner, and the invariant that guards i
 | Library scan via PhotoKit sweep | spike-proven | engine | 7 | [spike results](research/2026-09-04-photokit-spike-results.md) A1 |
 | Locality probe (network-disallowed request) | spike-proven | engine | 7 | spike results, findings 3 and 8 |
 | Shared-album exclusion | spike-proven (as a finding) | engine | 7 | spike results, finding 12 |
-| Size before download | spike-proven on macOS 27 for user-library assets | engine | 6 | spike results, finding 2 |
+| Size before download | spike-proven on macOS 27; estimate on 26 per D1 | engine | 6 | spike results, finding 2; [spec v2](specs/2026-09-06-engine-core-v2.md) |
 | Download, streamed, stall-cancelled, retried | spike-proven | engine | 5 | spike results A1 to A3 |
 | Byte verification (SHA-256) | spike-proven | engine | 1 | spike results |
 | Archive format and manifest | not started (Python format is the oracle) | engine | 2 | `src/iphoto/manifest.py` |

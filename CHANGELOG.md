@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file. One line pe
 
 ## [Unreleased]
 
+- 2026-09-06 docs: red team of the engine design (five Fable 5.1 reviews); spec v2 with the accepted fixes; north star gains the 30-day timeline, Shared Library gating, edit preservation, numeric exit gates, and minimum macOS 26; slice 1 plan rewritten.
 - 2026-09-06 docs: north star, live state, coverage ledger, and docs discipline established (`docs/`, `AGENTS.md`).
 - 2026-09-06 spike: stage B passed; delete, restore, and bookmark survival proven under App Sandbox; shared-album assets identified as non-deletable.
 - 2026-09-04 spike: stage A passed; PhotoKit enumerates and downloads iCloud originals byte-exact under App Sandbox on macOS 27.

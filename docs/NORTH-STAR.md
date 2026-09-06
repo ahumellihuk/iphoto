@@ -8,14 +8,14 @@ Binding intent for the product. Changes here are deliberate, rare, and human-own
 
 ## Customer and job
 
-A non-technical family hitting the iCloud storage-full warning, unwilling to pay for the next tier, who values footage far more than photos by the byte. They hire the app to free iCloud space without losing anything, and keep it because the problem returns every year.
+A non-technical family hitting the iCloud storage-full warning, unwilling to pay for the next tier, who values footage far more than photos by the byte. They hire the app to free iCloud space without losing anything, and keep it because the problem returns every year. The honest timeline is part of the promise: iCloud space comes back within 30 days of a delete, or immediately if the family empties Recently Deleted in Photos, because Apple offers no way for an app to do that for them.
 
 Evidence: [market synthesis](research/2026-09-04-market-synthesis.md), [user voice](research/2026-09-04-user-voice.md).
 
 ## Product shape
 
 - Name: **Video Attic** (decided 2026-09-06). Bundle identifiers use `com.videoattic`.
-- A native macOS app in Swift and SwiftUI on PhotoKit, sandboxed, Mac App Store first, a notarized direct build second.
+- A native macOS app in Swift and SwiftUI on PhotoKit, sandboxed, Mac App Store first, a notarized direct build second. Minimum macOS 26 (decided 2026-09-06 after the red team: 27 drops every Intel Mac and reaches half of active Macs only months after release); exact video sizes on 27, estimates on 26.
 - Photos stays the family's front door. The app is the tiered-storage layer beneath it: move large old videos to an external drive, keep a catalog with thumbnails, bring any video back into Photos in one click.
 - One-time purchase in the $29 to $39 range, family tier above it. Any recurring charge must be for a recurring cost the customer can see.
 - The Python CLI in `src/iphoto` is the frozen reference implementation and test oracle for the archive format. Maintenance only: bug fixes, no features.
@@ -32,7 +32,7 @@ Every spec, plan, and slice is checked against these. A change that would break 
 4. **Sandboxed and public-API only.** The App Store build uses PhotoKit and security-scoped bookmarks exclusively. Bookmarks resolve without mounting, and "volume absent" is a recoverable state with a reconnect prompt, never a crash or a silent mount. Anything needing a private API lives only in the direct build behind a documented capability flag.
 5. **Every long operation is resumable.** Interruptions, drive disconnects, and sleep never lose progress or leave the library ambiguous. Downloads use bounded waits, retry with backoff, and byte verification, because PhotoKit and iCloud can stall silently.
 6. **No jargon in the primary flow.** The user sees videos, space, drive, and Photos, never identifiers, checksums, or error codes. Detail lives one click down.
-7. **Only user-library assets are touched.** Shared-album assets (PhotoKit source type cloud-shared) are excluded from selection, deletion, and restore. Locality is decided by a PhotoKit probe, never by a database flag.
+7. **Only assets the family alone owns are touched, and edits are never destroyed.** Shared-album assets (PhotoKit source type cloud-shared) are excluded from selection, deletion, and restore. PhotoKit cannot tell an iCloud Shared Library video from a personal one, so Shared Library participation is detected and, when present, deletion is gated behind an explicit warning that family members' videos may be included and that deletion affects everyone. Videos with edits are excluded until the app can archive the edit alongside the original. Locality is decided by a PhotoKit probe, never by a database flag.
 
 ## Out of scope for the north star
 
@@ -45,9 +45,9 @@ Phase detail belongs in dated specs under [specs/](specs/); this list is the ord
 | Phase | Name | Exit gate |
 |---|---|---|
 | 0 | Research and spike | Done 2026-09-06. Niche chosen, stack proven, invariants written. |
-| 1 | Engine | A Swift package that scans, probes, downloads, verifies, archives, deletes, and restores through PhotoKit, with a developer CLI, resumable sessions, and the ability to adopt the existing Python-made archive. Proven on this Mac's real library end to end. |
-| 2 | App | SwiftUI app for a non-technical user: onboarding and permissions, drive choice, find-and-review flow grouped by date and place, archive with progress, catalog with thumbnails and search, one-click restore. Passes a hallway test with someone who has never seen it. |
-| 3 | Launch | Mac App Store submission accepted, pricing live, direct notarized build, support and refund path, marketing page. First paying customers. |
+| 1 | Engine | A Swift package that scans, probes, downloads, verifies, archives, deletes, and restores through PhotoKit, with a developer harness, resumable sessions, and the ability to adopt the existing Python-made archive. Proven on this Mac's real library: fifty cold iCloud-only videos including five over 2 GB; one forced sleep and one drive unplug mid-run; resume with zero re-downloads of verified files; ten deletes and ten restores; one full adopted Python manifest verified; every exclusion reason exercised at least once; zero untyped failures in the run log. |
+| 2 | App | SwiftUI app for a non-technical user: onboarding and permissions, drive choice, find-and-review flow grouped by date and place, archive with progress, catalog with thumbnails and search, one-click restore. Three people who have never seen it each complete archive and restore on a sample library unaided in under 15 minutes, and afterwards can say where their videos are and when iCloud space comes back. |
+| 3 | Launch | Mac App Store submission accepted with the review dossier, pricing live, direct notarized build, support and refund path, marketing page. Ten paying customers, fewer than one support ticket per five sales, no review under three stars citing data loss. |
 | 4 | Growth | Chosen by evidence from phase 3, from: rules and suggestions, optimized-library backup on the same engine, on-device media analysis, second copies. Each is its own spec. |
 
 ## Failure families

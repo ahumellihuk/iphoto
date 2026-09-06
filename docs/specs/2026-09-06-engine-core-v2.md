@@ -1,13 +1,15 @@
 # Spec: Engine core, v2 (2026-09-06)
 
-Status: draft for review; supersedes [engine core v1](2026-09-06-engine-core.md) after the red team ([consolidation](../research/redteam/2026-09-06-consolidated.md)). Immutable once approved; corrections go in a dated `UPDATE:` line at the top. Sections unchanged from v1 are kept so this file stands alone.
+Status: approved 2026-09-06 with decisions D1 to D4 resolved as below; supersedes [engine core v1](2026-09-06-engine-core.md) after the red team ([consolidation](../research/redteam/2026-09-06-consolidated.md)). Immutable once approved; corrections go in a dated `UPDATE:` line at the top. Sections unchanged from v1 are kept so this file stands alone.
 
 ## Decisions this spec assumes
 
-- Minimum macOS: pending decision D1. The spec is written so that either answer is a small delta: a `SizeInfo` type carries exact sizes on macOS 27 and estimates on 26.
+- Minimum macOS 26 (D1). `SizeInfo` carries exact sizes from `dataSize` on macOS 27 and estimates from duration and resolution on 26; budgets apply a 1.25 factor to estimates and the verifier records the real size.
 - The direct build ships the same engine with no AppleScript and no capability flags.
 - Product name Video Attic. The Swift package is `ArchiveCore`, the harness is `ArchiveHarness` with bundle id `dev.videoattic.harness`, kept outside any App Store Connect record.
-- Edited videos are excluded from phase 1 (decision D4, recommended yes).
+- Edited videos are excluded from phase 1 archiving with a visible count (D4).
+- iCloud Shared Library participation is detected where macOS exposes it and, when present, the app must show an explicit warning before any delete (D2). Slice 1 investigates what macOS 26 and 27 expose; `sharedLibraryDetected` is `nil` when the engine cannot tell, and the app treats `nil` as "warn".
+- North star wording and exit gates updated per D3.
 
 ## Goal
 
@@ -21,7 +23,7 @@ No SwiftUI, no thumbnails browser, no search UI, no rules engine, no cloud desti
 
 ```
 engine/
-  Package.swift                  swift-tools 6.0, platforms per D1, language mode 5
+  Package.swift                  swift-tools 6.0, platforms [.macOS("26.0")], language mode 5
   Sources/ArchiveCore/
     Support/     EngineError, Signals (closed enums), Hashing, OneShot, Log
     Library/     AssetFacts, AssetRecord, AssetClassifier, PhotoKitLibraryScanner, LocalityProbe, LibraryEnvironment
@@ -69,7 +71,7 @@ A unit test asserts every `JobState` transition into `failed` or `skipped` carri
 | `sourceTypeRaw` | `PHAsset.sourceType` | anything but exactly the user-library bit is excluded |
 | `locality` | `LocalityProbe` | advisory, with `probedAt` |
 
-Classification rules, in order: not user library → `notUserLibrary`; no `.video` resource → `noOriginalVideoResource` (there is no fallback to `.fullSizeVideo`); `hasAdjustments` → `hasAdjustments`; subtype high frame rate → `highFrameRate`; cinematic → `cinematic`; hidden → `hidden`; size unknown on macOS 27 → `sizeUnknown` (on 26 an estimate is used instead). Live Photos are images and never appear in a `.video` fetch; the classifier still tests `livePhotoComponent` so a future change cannot archive a paired video and delete the still. PhotoKit has no public API for titles, captions, or keywords; they are not preserved and the app must say so.
+Classification rules, in order: not user library → `notUserLibrary`; no `.video` resource → `noOriginalVideoResource` (there is no fallback to `.fullSizeVideo`); `hasAdjustments` → `hasAdjustments`; subtype high frame rate → `highFrameRate`; cinematic → `cinematic`; hidden → `hidden`; size unknown on macOS 27 → `sizeUnknown`; on macOS 26 `dataSize` does not exist and every size is an estimate, never an exclusion. Live Photos are images and never appear in a `.video` fetch; the classifier still tests `livePhotoComponent` so a future change cannot archive a paired video and delete the still. PhotoKit has no public API for titles, captions, or keywords; they are not preserved and the app must say so.
 
 ## Archive on the drive
 
