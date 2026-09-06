@@ -36,6 +36,19 @@ enum ScratchFolder {
         return (url, false)
     }
 
+    /// Show an open panel for a directory. Used by stage B for the archive volume.
+    @MainActor
+    static func pick(message: String) -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use this folder"
+        panel.message = message
+        NSApp.activate(ignoringOtherApps: true)
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
     private static func store(_ url: URL) {
         if let data = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
             UserDefaults.standard.set(data, forKey: key)

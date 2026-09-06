@@ -3,8 +3,7 @@ import Photos
 
 struct StageAConfig {
     var concurrency: Int = 1
-    var stallSeconds: TimeInterval = 180
-    var absoluteCapSeconds: TimeInterval = 3600
+    var download = DownloadConfig()
     var attempts: Int = 3
     var backoff: [TimeInterval] = [5, 15, 45]
     var skipDownload = false
@@ -18,7 +17,7 @@ final class StageA {
     let scratch: URL
     let writer: RecordWriter
     let config: StageAConfig
-    private let manager = PHAssetResourceManager.default()
+    private let downloader: Downloader
     private var sweep: [String: PHAsset] = [:]   // uuid prefix -> asset
 
     init(sample: [SampleVideo], scratch: URL, writer: RecordWriter, config: StageAConfig) {
@@ -26,6 +25,7 @@ final class StageA {
         self.scratch = scratch
         self.writer = writer
         self.config = config
+        self.downloader = Downloader(config: config.download)
     }
 
     func run() async {
@@ -56,8 +56,14 @@ final class StageA {
         print("sweep: \(result.count) video assets visible to PhotoKit")
     }
 
+    static func fetchAsset(uuid: String) -> PHAsset? {
+        for id in ["\(uuid)/L0/001", uuid] {
+            if let a = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject { return a }
+        }
+        return nil
+    }
+
     private func fetchAsset(_ v: SampleVideo) -> (PHAsset?, String) {
-        // Direct fetch, both identifier spellings seen on macOS.
         for id in ["\(v.uuid)/L0/001", v.uuid] {
             let r = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
             if let a = r.firstObject { return (a, "direct:\(id.hasSuffix("/L0/001") ? "L0" : "bare")") }
@@ -77,7 +83,7 @@ final class StageA {
 
         let resources = PHAssetResource.assetResources(for: asset)
         let types: String = resources.map { String($0.type.rawValue) }.joined(separator: ",")
-        let video: PHAssetResource? = resources.first { $0.type == .video } ?? resources.first { $0.type == .fullSizeVideo }
+        let video: PHAssetResource? = Downloader.originalVideoResource(for: asset)
         let durationText = String(format: "%.1f", asset.duration)
         let pixelText = "\(asset.pixelWidth)x\(asset.pixelHeight)"
         let filenameText = video?.originalFilename ?? ""
@@ -87,7 +93,7 @@ final class StageA {
 
         measureSize(v, resource)
 
-        let localityBefore = await probeLocal(resource)
+        let localityBefore = await downloader.probeLocal(resource)
         let expectedLocal = v.is_local
         let observedLocal = localityBefore.ok
         writer.write(record(v, "locality", ok: observedLocal == expectedLocal, error: localityBefore.error,
@@ -102,7 +108,7 @@ final class StageA {
         var success = false
         for attempt in 1...config.attempts {
             let dest = scratch.appendingPathComponent("\(v.uuid)-\(v.original_filename)")
-            let result = await download(resource, to: dest)
+            let result = await downloader.download(resource, to: dest)
             writer.write(record(v, "download", attempt: attempt, ok: result.ok, error: result.error,
                                 bytes: result.bytes, elapsed: result.elapsed, stalls: result.stalls,
                                 note: result.note))
@@ -119,7 +125,7 @@ final class StageA {
         }
 
         if success {
-            let after = await probeLocal(resource)
+            let after = await downloader.probeLocal(resource)
             writer.write(record(v, "cache", ok: true, error: after.error,
                                 note: after.ok ? "cached_in_library" : "not_cached"))
         }
@@ -139,74 +145,6 @@ final class StageA {
                                     "private_matches_db": "\(privateSize == dbSize)"]))
     }
 
-    // MARK: PhotoKit calls
-
-    private struct Probe { let ok: Bool; let error: Error? }
-
-    /// Request with network disallowed. Success means the bytes are local.
-    private func probeLocal(_ resource: PHAssetResource) async -> Probe {
-        let opts = PHAssetResourceRequestOptions()
-        opts.isNetworkAccessAllowed = false
-        return await withCheckedContinuation { cont in
-            var done = false
-            manager.requestData(for: resource, options: opts, dataReceivedHandler: { _ in }) { error in
-                guard !done else { return }
-                done = true
-                cont.resume(returning: Probe(ok: error == nil, error: error))
-            }
-        }
-    }
-
-    private struct DownloadResult {
-        let ok: Bool; let error: Error?; let bytes: Int; let elapsed: Double; let stalls: Int; let note: String?
-    }
-
-    /// Streams the resource to `dest` with network allowed. Cancels on stall.
-    private func download(_ resource: PHAssetResource, to dest: URL) async -> DownloadResult {
-        try? FileManager.default.removeItem(at: dest)
-        FileManager.default.createFile(atPath: dest.path, contents: nil)
-        guard let handle = try? FileHandle(forWritingTo: dest) else {
-            return DownloadResult(ok: false, error: SpikeError.message("cannot open dest"), bytes: 0, elapsed: 0, stalls: 0, note: nil)
-        }
-        let opts = PHAssetResourceRequestOptions()
-        opts.isNetworkAccessAllowed = true
-
-        let state = DownloadState()
-        opts.progressHandler = { p in state.touch(progress: p) }
-        let start = Date()
-
-        let requestID = manager.requestData(for: resource, options: opts, dataReceivedHandler: { data in
-            handle.write(data)
-            state.touch(bytes: data.count)
-        }) { error in
-            state.finish(error: error)
-        }
-
-        // Watchdog: cancel on progress inactivity or absolute cap.
-        while !state.isFinished {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            let now = Date()
-            if now.timeIntervalSince(state.lastActivity) > config.stallSeconds {
-                state.stalls += 1
-                state.note = "stalled after \(state.bytes) B, no activity for \(Int(config.stallSeconds))s"
-                manager.cancelDataRequest(requestID)
-                state.waitFinish(timeout: 10)
-                break
-            }
-            if now.timeIntervalSince(start) > config.absoluteCapSeconds {
-                state.note = "absolute cap \(Int(config.absoluteCapSeconds))s exceeded"
-                manager.cancelDataRequest(requestID)
-                state.waitFinish(timeout: 10)
-                break
-            }
-        }
-        try? handle.close()
-        let elapsed = Date().timeIntervalSince(start)
-        let ok = state.error == nil && state.isFinished && state.note == nil
-        return DownloadResult(ok: ok, error: state.error, bytes: state.bytes, elapsed: elapsed,
-                              stalls: state.stalls, note: state.note ?? state.progressSummary)
-    }
-
     private func verify(_ v: SampleVideo, _ dest: URL) {
         let size = Hashing.fileSize(of: dest) ?? -1
         let start = Date()
@@ -220,32 +158,5 @@ final class StageA {
                             note: "size_ok=\(sizeOK) hash_ok=\(hashOK.map { "\($0)" } ?? "n/a") expected=\(v.expectedSize)",
                             extra: ["sha256": sha]))
         if !config.keepFiles { try? FileManager.default.removeItem(at: dest) }
-    }
-}
-
-/// Mutable state shared between PhotoKit callbacks and the watchdog.
-final class DownloadState {
-    private let lock = NSLock()
-    private let done = DispatchSemaphore(value: 0)
-    private(set) var lastActivity = Date()
-    private(set) var bytes = 0
-    private(set) var error: Error?
-    private(set) var isFinished = false
-    var stalls = 0
-    var note: String?
-    private var progressSamples: [Double] = []
-
-    func touch(bytes n: Int) { lock.lock(); bytes += n; lastActivity = Date(); lock.unlock() }
-    func touch(progress p: Double) {
-        lock.lock(); lastActivity = Date()
-        if progressSamples.last.map({ p - $0 >= 0.1 }) ?? true { progressSamples.append(p) }
-        lock.unlock()
-    }
-    func finish(error e: Error?) {
-        lock.lock(); error = e; isFinished = true; lock.unlock(); done.signal()
-    }
-    func waitFinish(timeout: TimeInterval) { _ = done.wait(timeout: .now() + timeout) }
-    var progressSummary: String? {
-        progressSamples.isEmpty ? nil : "progress=" + progressSamples.map { String(format: "%.1f", $0) }.joined(separator: ",")
     }
 }

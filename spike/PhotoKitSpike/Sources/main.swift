@@ -21,6 +21,10 @@ struct Args {
     var subset = "all"
     var config = StageAConfig()
     var pickScratch = false
+    var stage = "A"                 // A | prepare | delete | restore | bookmark
+    var uuids: [String] = []
+    var iUnderstand = false
+    var pickArchive = false
 
     init() {
         var it = CommandLine.arguments.dropFirst().makeIterator()
@@ -31,8 +35,12 @@ struct Args {
             case "--variant": variant = it.next() ?? variant
             case "--subset": subset = it.next() ?? subset
             case "--concurrency": config.concurrency = Int(it.next() ?? "1") ?? 1
-            case "--stall": config.stallSeconds = Double(it.next() ?? "180") ?? 180
-            case "--cap": config.absoluteCapSeconds = Double(it.next() ?? "3600") ?? 3600
+            case "--stall": config.download.stallSeconds = Double(it.next() ?? "180") ?? 180
+            case "--cap": config.download.absoluteCapSeconds = Double(it.next() ?? "3600") ?? 3600
+            case "--stage": stage = it.next() ?? stage
+            case "--uuids": uuids = (it.next() ?? "").split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            case "--i-understand": iUnderstand = true
+            case "--pick-archive": pickArchive = true
             case "--attempts": config.attempts = Int(it.next() ?? "3") ?? 3
             case "--skip-download": config.skipDownload = true
             case "--keep-files": config.keepFiles = true
@@ -77,8 +85,15 @@ func runSpike() async -> Int32 {
         print("---- \(ISO8601DateFormatter().string(from: Date())) \(CommandLine.arguments.dropFirst().joined(separator: " "))")
     }
 
-    let sampleURL = URL(fileURLWithPath: args.sample, relativeTo: scratch)
     let outURL = URL(fileURLWithPath: args.out, relativeTo: scratch)
+
+    let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+    print("photos authorization: \(status.rawValue) (\(status == .authorized ? "authorized" : "NOT authorized"))")
+    guard status == .authorized else { return 3 }
+
+    if args.stage != "A" { return await runStageB(args, scratch: scratch, outURL: outURL) }
+
+    let sampleURL = URL(fileURLWithPath: args.sample, relativeTo: scratch)
     let sample: Sample
     do { sample = try Sample.load(from: sampleURL) } catch {
         fputs("cannot load sample \(sampleURL.path): \(error)\n", stderr); return 1
@@ -86,10 +101,6 @@ func runSpike() async -> Int32 {
     let videos = sample.subset(args.subset)
     let totalBytes = videos.reduce(0) { $0 + $1.size_bytes }
     print("sample: \(videos.count) videos, \(totalBytes / 1_048_576) MiB, subset=\(args.subset) variant=\(args.variant) concurrency=\(args.config.concurrency)")
-
-    let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-    print("photos authorization: \(status.rawValue) (\(status == .authorized ? "authorized" : "NOT authorized"))")
-    guard status == .authorized else { return 3 }
 
     if !args.config.skipDownload {
         let free = (try? scratch.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage) ?? 0
@@ -119,6 +130,43 @@ func runSpike() async -> Int32 {
     writer.close()
     print("results: \(outURL.appendingPathComponent(runID + ".jsonl").path)")
     return 0
+}
+
+@MainActor
+func runStageB(_ args: Args, scratch: URL, outURL: URL) async -> Int32 {
+    let runID = "B-\(args.stage)-" + ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+    let writer: RecordWriter
+    do { writer = try RecordWriter(directory: outURL, runID: runID, variant: "B-\(args.stage)") } catch {
+        fputs("cannot open results: \(error)\n", stderr); return 1
+    }
+    defer { writer.close(); print("results: \(outURL.appendingPathComponent(runID + ".jsonl").path)") }
+    let stage = StageB(scratch: scratch, writer: writer, downloadConfig: args.config.download)
+    let pv = ProcessInfo.processInfo.operatingSystemVersion
+    print("stage B/\(args.stage) macOS \(pv.majorVersion).\(pv.minorVersion).\(pv.patchVersion) uuids=\(args.uuids)")
+
+    switch args.stage {
+    case "prepare":
+        guard !args.uuids.isEmpty else { fputs("--uuids required\n", stderr); return 2 }
+        // Reference hashes from any sample file in scratch (AppleScript ground truth from stage A).
+        var refs: [String: String] = [:]
+        for name in ["sample.json", "sample2.json"] {
+            if let s = try? Sample.load(from: scratch.appendingPathComponent(name)) {
+                for v in s.videos where v.reference_sha256 != nil { refs[v.uuid] = v.reference_sha256 }
+            }
+        }
+        return await stage.prepare(uuids: args.uuids, references: refs) ? 0 : 5
+    case "delete":
+        guard !args.uuids.isEmpty, args.uuids.count <= 2 else { fputs("--uuids required, at most 2\n", stderr); return 2 }
+        guard args.iUnderstand else { fputs("delete refuses to run without --i-understand\n", stderr); return 2 }
+        return await stage.delete(uuids: args.uuids) ? 0 : 5
+    case "restore":
+        guard !args.uuids.isEmpty else { fputs("--uuids required\n", stderr); return 2 }
+        return await stage.restore(uuids: args.uuids) ? 0 : 5
+    case "bookmark":
+        return stage.bookmark(forcePick: args.pickArchive) ? 0 : 5
+    default:
+        fputs("unknown stage \(args.stage)\n", stderr); return 2
+    }
 }
 
 let app = NSApplication.shared

@@ -12,7 +12,7 @@ TARGET   ?= arm64-apple-macos26.0
 SDK      := $(shell xcrun --sdk macosx --show-sdk-path)
 BUNDLE_ID := com.iphoto.PhotoKitSpike
 
-.PHONY: all run clean reset-tcc check-idle
+.PHONY: all run clean reset-tcc check-idle prepare delete restore bookmark
 
 all: $(BIN)
 
@@ -39,3 +39,25 @@ reset-tcc:
 
 clean:
 	rm -rf build
+
+# ---- Stage B (destructive; each target is a separate explicit run) ----
+# make prepare UUIDS=a,b        two verified local copies + manifest, library untouched
+# make delete  UUIDS=a,b        re-verifies copies, then deletes via PhotoKit dialog
+# make restore UUIDS=a,b        re-imports from archive, checks date/location/bytes
+# make bookmark [PICK=1]        resolves the archive-volume bookmark and writes a probe
+
+prepare: $(BIN) check-idle
+	open -W -a $(CURDIR)/$(APP) --args --stage prepare --uuids $(UUIDS)
+	@tail -n 20 ../scratch/results/latest.log
+
+delete: $(BIN) check-idle
+	open -W -a $(CURDIR)/$(APP) --args --stage delete --uuids $(UUIDS) --i-understand
+	@tail -n 20 ../scratch/results/latest.log
+
+restore: $(BIN) check-idle
+	open -W -a $(CURDIR)/$(APP) --args --stage restore --uuids $(UUIDS)
+	@tail -n 20 ../scratch/results/latest.log
+
+bookmark: $(BIN)
+	open -W -a $(CURDIR)/$(APP) --args --stage bookmark $(if $(PICK),--pick-archive,)
+	@tail -n 5 ../scratch/results/latest.log
