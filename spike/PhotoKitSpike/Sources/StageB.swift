@@ -75,6 +75,25 @@ final class StageB {
                     reference_sha256: e?.reference_sha256, reference_size: e?.size_bytes)
     }
 
+    /// Find the manifest entry for an original uuid or a restored identifier prefix.
+    private func entry(for id: String, in m: [String: Entry]) -> (String, Entry)? {
+        if let e = m[id] { return (id, e) }
+        return m.first { $0.value.restored_identifier?.hasPrefix(id) == true }.map { ($0.key, $0.value) }
+    }
+
+    /// Read-only: why an asset may or may not be deletable.
+    func inspect(ids: [String]) {
+        for id in ids {
+            let v = video(id, nil)
+            guard let a = StageA.fetchAsset(uuid: id) else { writer.write(record(v, "inspect", ok: false, note: "not found")); continue }
+            let res = PHAssetResource.assetResources(for: a).map { "\($0.type.rawValue)" }.joined(separator: ",")
+            let note = "sourceType=\(a.sourceType.rawValue) subtypes=\(a.mediaSubtypes.rawValue) hidden=\(a.isHidden) favorite=\(a.isFavorite) "
+                + "hasAdjustments=\(a.hasAdjustments) burst=\(a.representsBurst) canDelete=\(a.canPerform(.delete)) canContent=\(a.canPerform(.content)) "
+                + "canProperties=\(a.canPerform(.properties)) resources=[\(res)] duration=\(String(format: "%.1f", a.duration)) created=\(a.creationDate.map { iso.string(from: $0) } ?? "nil")"
+            writer.write(record(v, "inspect", ok: a.canPerform(.delete), note: note))
+        }
+    }
+
     // MARK: prepare
 
     func prepare(uuids: [String], references: [String: String]) async -> Bool {
@@ -133,10 +152,10 @@ final class StageB {
         var manifest = loadManifest()
         var assets: [PHAsset] = []
         for uuid in uuids {
-            let v = video(uuid, manifest[uuid])
-            guard let e = manifest[uuid] else {
-                writer.write(record(v, "delete-precheck", ok: false, note: "not in manifest; run prepare first")); return false
+            guard let (_, e) = entry(for: uuid, in: manifest) else {
+                writer.write(record(video(uuid, nil), "delete-precheck", ok: false, note: "not in manifest; run prepare first")); return false
             }
+            let v = video(uuid, e)
             let a = (try? Hashing.sha256(of: URL(fileURLWithPath: e.archive_path))) ?? "error"
             let b = (try? Hashing.sha256(of: URL(fileURLWithPath: e.backup_path))) ?? "error"
             let copiesOK = a == e.sha256 && b == e.sha256
@@ -145,7 +164,7 @@ final class StageB {
             }
             let canDelete = asset.canPerform(.delete)
             writer.write(record(v, "delete-precheck", ok: copiesOK && canDelete,
-                                note: "archive_ok=\(a == e.sha256) backup_ok=\(b == e.sha256) canPerformDelete=\(canDelete)"))
+                                note: "archive_ok=\(a == e.sha256) backup_ok=\(b == e.sha256) canPerformDelete=\(canDelete) sourceType=\(asset.sourceType.rawValue) target=\(asset.localIdentifier)"))
             guard copiesOK && canDelete else { return false }
             assets.append(asset)
         }
@@ -176,10 +195,15 @@ final class StageB {
         for uuid in uuids {
             let still = StageA.fetchAsset(uuid: uuid) != nil
             if still { allGone = false }
-            let v = video(uuid, manifest[uuid])
+            let found = entry(for: uuid, in: manifest)
+            let v = video(uuid, found?.1)
             writer.write(record(v, "delete", ok: outcome.0 && !still, error: outcome.1, elapsed: elapsed,
-                                note: "completion_fired=\(completionFired) success=\(outcome.0) still_fetchable=\(still)"))
-            if !still, var e = manifest[uuid] { e.deleted_at = iso.string(from: Date()); manifest[uuid] = e }
+                                note: "completion_fired=\(completionFired) success=\(outcome.0) still_fetchable=\(still) target=\(uuid)"))
+            if !still, let (key, e0) = found {
+                var e = e0
+                if key == uuid { e.deleted_at = iso.string(from: Date()) } else { e.restored_identifier = nil; e.restored_at = nil }
+                manifest[key] = e
+            }
         }
         saveManifest(manifest)
         return outcome.0 && allGone
@@ -194,6 +218,12 @@ final class StageB {
             let v = video(uuid, manifest[uuid])
             guard let e = manifest[uuid] else {
                 writer.write(record(v, "restore", ok: false, note: "not in manifest")); allOK = false; continue
+            }
+            if StageA.fetchAsset(uuid: uuid) != nil {
+                writer.write(record(v, "restore", ok: false, note: "refused: original still in library, restoring would duplicate it")); allOK = false; continue
+            }
+            if e.restored_identifier != nil {
+                writer.write(record(v, "restore", ok: false, note: "refused: already restored as \(e.restored_identifier!)")); allOK = false; continue
             }
             let source = URL(fileURLWithPath: e.archive_path)
             guard (try? Hashing.sha256(of: source)) == e.sha256 else {

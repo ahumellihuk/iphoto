@@ -12,7 +12,7 @@ TARGET   ?= arm64-apple-macos26.0
 SDK      := $(shell xcrun --sdk macosx --show-sdk-path)
 BUNDLE_ID := com.iphoto.PhotoKitSpike
 
-.PHONY: all run clean reset-tcc check-idle prepare delete restore bookmark
+.PHONY: all run clean reset-tcc check-idle prepare delete restore bookmark inspect
 
 all: $(BIN)
 
@@ -61,3 +61,7 @@ restore: $(BIN) check-idle
 bookmark: $(BIN)
 	open -W -a $(CURDIR)/$(APP) --args --stage bookmark $(if $(PICK),--pick-archive,)
 	@tail -n 5 ../scratch/results/latest.log
+
+inspect: $(BIN)
+	open -W -a $(CURDIR)/$(APP) --args --stage inspect --uuids $(UUIDS)
+	@grep 'inspect#' ../scratch/results/latest.log | tail -n 8

@@ -162,6 +162,9 @@ func runStageB(_ args: Args, scratch: URL, outURL: URL) async -> Int32 {
     case "restore":
         guard !args.uuids.isEmpty else { fputs("--uuids required\n", stderr); return 2 }
         return await stage.restore(uuids: args.uuids) ? 0 : 5
+    case "inspect":
+        guard !args.uuids.isEmpty else { fputs("--uuids required\n", stderr); return 2 }
+        stage.inspect(ids: args.uuids); return 0
     case "bookmark":
         return stage.bookmark(forcePick: args.pickArchive) ? 0 : 5
     default:
