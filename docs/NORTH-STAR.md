@@ -14,6 +14,7 @@ Evidence: [market synthesis](research/2026-09-04-market-synthesis.md), [user voi
 
 ## Product shape
 
+- Name: **Video Attic** (decided 2026-09-06). Bundle identifiers use `com.videoattic`.
 - A native macOS app in Swift and SwiftUI on PhotoKit, sandboxed, Mac App Store first, a notarized direct build second.
 - Photos stays the family's front door. The app is the tiered-storage layer beneath it: move large old videos to an external drive, keep a catalog with thumbnails, bring any video back into Photos in one click.
 - One-time purchase in the $29 to $39 range, family tier above it. Any recurring charge must be for a recurring cost the customer can see.

@@ -4,7 +4,7 @@ The only home for current status. Rewritten continuously by the execution channe
 
 ## Now
 
-- Phase 1, Engine. Engine spec drafted: [specs/2026-09-06-engine-core.md](specs/2026-09-06-engine-core.md), awaiting review. No code until approved.
+- Phase 1, Engine, slice 1: package skeleton, PhotoKit scanner with shared-album exclusion, locality probe, harness `scan`. Plan: [plans/2026-09-06-engine-slice-1.md](plans/2026-09-06-engine-slice-1.md). Spec approved 2026-09-06: [specs/2026-09-06-engine-core.md](specs/2026-09-06-engine-core.md).
 
 ## Next (ordered)
 
@@ -22,11 +22,12 @@ The only home for current status. Rewritten continuously by the execution channe
 
 ## Decisions pending
 
-- Product name. Naming research in progress; working name "iphoto" clashes with Apple's old app.
 - Final price point within $29 to $39 and the family tier.
 
 ## Decisions made
 
+- 2026-09-06 Product name: Video Attic ([naming study](research/2026-09-06-naming.md)). Follow-ups: formal class 9 and 42 search, videoattic.app domain, early US application.
+- 2026-09-06 Engine spec approved.
 - 2026-09-06 Minimum macOS 27 (public `dataSize`, no private API).
 - 2026-09-06 Direct build ships the same PhotoKit engine, no AppleScript, no capability flags.
 
