@@ -4,7 +4,7 @@ The only home for current status. Rewritten continuously by the execution channe
 
 ## Now
 
-- Phase 1, Engine. First slice: write the engine spec (`specs/<date>-engine-core.md`) covering package layout, the archive format compatible with the Python tool's manifests, session state, and the developer CLI. No code until the spec is reviewed.
+- Phase 1, Engine. Engine spec drafted: [specs/2026-09-06-engine-core.md](specs/2026-09-06-engine-core.md), awaiting review. No code until approved.
 
 ## Next (ordered)
 
@@ -22,10 +22,13 @@ The only home for current status. Rewritten continuously by the execution channe
 
 ## Decisions pending
 
-- Product name. Working name "iphoto" is the Python tool's and clashes with Apple's old app.
-- Minimum macOS: 27 (public `dataSize`) versus 26 with estimated sizes. Leaning 27; macOS 27 ships this month.
-- Direct build scope: same PhotoKit engine only, or a capability flag for anything beyond it. No known need for AppleScript after the spike.
+- Product name. Naming research in progress; working name "iphoto" clashes with Apple's old app.
 - Final price point within $29 to $39 and the family tier.
+
+## Decisions made
+
+- 2026-09-06 Minimum macOS 27 (public `dataSize`, no private API).
+- 2026-09-06 Direct build ships the same PhotoKit engine, no AppleScript, no capability flags.
 
 ## Known risks carried forward
 
