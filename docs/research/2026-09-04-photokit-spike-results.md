@@ -1,6 +1,6 @@
 # PhotoKit spike results, stage A (2026-09-04)
 
-**Stage A verdict: PASS.** Enumeration, byte-exact download, stall recovery, and throughput all cleared their gates across A1, A2, and A3. The size gate failed only for non-camera `.mp4` imports. Stage B (delete, re-import, bookmark survival) has not run.
+**Stage A verdict: PASS. Stage B verdict: PASS.** Enumeration, byte-exact download, stall recovery, and throughput cleared their gates across A1 to A3. Delete, restore, and bookmark survival cleared theirs in stage B on 2026-09-06. The size gate failed only for shared-album assets, which turned out to be the real explanation for the `.mp4` anomaly (finding 2 is superseded by finding 12).
 
 Spec: [2026-09-04-photokit-spike.md](../specs/2026-09-04-photokit-spike.md). Raw data: `spike/scratch/results/A1-*.jsonl`, `A1size-*.jsonl`, `A2-*.jsonl`, `A3c2-*.jsonl`, `A3c4-*.jsonl` (gitignored, on this Mac).
 
@@ -72,9 +72,41 @@ Finding 9. **Concurrency helps only modestly.** Aggregate throughput rises from 
 
 - Cold-download behavior on more than six files over 1 GB, since the library ran out of them today. The largest cold file measured was 1.7 GB.
 - Whether the cached originals get evicted, and how quickly.
-- Anything about deletion, re-import, or bookmark survival (stage B).
 - Behavior across sleep, or on macOS 26.
 
 ## Stage A summary for the north star
 
 PhotoKit from inside App Sandbox can be the product's only download engine on macOS 27. It enumerated every iCloud-only video, downloaded every one byte-exact, matched AppleScript hashes on all paired files, recovered its only transient error on the first retry, and did so with Photos.app closed and at about 0.75 to 1.0x AppleScript's speed. The costs are known: sizes are unavailable for non-camera imports, downloads cache the original in the library, and the product must carry its own locality probe because no flag exists. Stage B remains the gate for deletion and restore.
+
+## Stage B (2026-09-06): delete, restore, bookmark survival
+
+Run against a local archive folder inside the scratch folder because the external drive was unavailable. Safety: `prepare` made two independently hashed copies of each candidate and a manifest; `delete` re-hashed both copies at run time before submitting; the library ended with the same footage it started with.
+
+Candidates prepared: IMG_9946.MOV (camera, 21 MB, 2022), IMG_3693.mp4 (21 MB, 2023), IMG_7736.MOV (camera, 717 MB, 2025, kept as spare). All three hashed identical to the stage A AppleScript references, and all carried a creation date and location.
+
+| Measure | Result | Gate |
+|---|---|---|
+| Delete: completion fires, re-fetch confirms | 2 of 2 in one change block, completion after 3.8 s, neither fetchable afterwards | PASS |
+| Restore: date within 1 s, location within 10 m | 2 of 2, delta 0.000 s and 0.0 m | PASS |
+| Restore: bytes identical after re-download | 2 of 2, SHA-256 equal to manifest | PASS |
+| Bookmark: resolves and writes after reconnect | same volume UUID, `isStale=false`, write and read OK across two eject and reattach cycles | PASS |
+| Bookmark: fails recoverably when the volume is absent | with `.withoutMounting`, `NSCocoaErrorDomain` code 4 and nothing mounted | PASS |
+
+What actually happened, in order, because the sequence matters:
+
+1. The first delete attempt aborted at the precheck because IMG_3693.mp4 reported `canPerform(.delete) == false`. Nothing was deleted. The shell chain then ran restore anyway (it keyed off the wrong exit status), which re-imported both videos while the originals were still present, creating two duplicates. Restore was then given a guard that refuses when the original is still fetchable.
+2. The two duplicates became the delete targets: byte-identical copies minutes old, originals intact, archive copies re-verified. Both deleted in one change block behind Apple's dialog.
+3. Restore had already proven the round trip: new identifiers were assigned, creation date and location came back exact, and re-downloading each new asset's original produced the manifest hash.
+
+Findings:
+
+10. **Delete works from the sandbox and the callback fires.** One change block, one dialog, 3.8 s for two assets. Verification by re-fetch matched the callback. The macOS dialog wording was not captured programmatically and should be noted by hand.
+11. **Restore is exact.** `PHAssetCreationRequest` with explicit `creationDate` and `location` reproduces both to the precision PhotoKit exposes, and the imported bytes are unchanged. The restored asset gets a new identifier, so the catalog must store the archive hash, not the identifier, as the durable key.
+12. **The "non-camera .mp4" assets are shared-album items.** `inspect` showed `sourceType == 2`, PhotoKit's cloud-shared value, with `canPerform` false for delete, content, and properties. That single fact explains the missing `dataSize`, the lone original resource, and the refusal to delete. Consequence for the product: shared-album assets must be excluded from archive selection, and any size estimate for them is moot. This supersedes finding 2's "non-camera imports" reading, which was the right pattern with the wrong cause.
+13. **Restoring a shared-album item into the user library duplicates it into iCloud storage.** The accidental restore of IMG_3693.mp4 created a user-library asset that counts against the owner's quota. A product restore must refuse for assets it did not archive from the user library.
+14. **Bookmarks to disk images mount on resolve by default.** Even after the image file was renamed, resolution remounted it, because bookmarks track files by identity. `.withoutMounting` makes an absent volume fail cleanly. The product should always resolve without mounting and treat code 4 as "drive not connected, ask to reconnect."
+15. **Shell exit status is not a safety mechanism.** The duplicate incident came from chaining steps on a pipe's status. Every destructive step must verify its own preconditions from library state, which restore now does.
+
+## Spike verdict
+
+PhotoKit from inside App Sandbox on macOS 27 is sufficient for the whole product loop: enumerate, size (for user-library assets), download byte-exact, delete behind Apple's dialog, restore exact, and remember an external volume safely. The only assets it cannot handle are shared-album items, which the product should not touch. Remaining unknowns are behavior on macOS 26, across sleep, and on cold files above 1.7 GB.
